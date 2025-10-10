@@ -1,0 +1,7 @@
+.env
+.idea
+dev
+models
+__pycache__
+pyrightconfig.json
+deploy
