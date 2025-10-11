@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from auto_summarization.entrypoints.routers import analysis, analyze_types, document, sessions
+from auto_summarization.entrypoints.routers import analysis, analyze_types, document
 from auto_summarization.services.config import settings
 
 
