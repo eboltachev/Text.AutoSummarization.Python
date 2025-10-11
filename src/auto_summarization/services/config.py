@@ -7,6 +7,7 @@ from typing import Generator, List
 from uuid import uuid4
 
 from pydantic import AliasChoices, Field, field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker

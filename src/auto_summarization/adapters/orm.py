@@ -3,6 +3,7 @@ from __future__ import annotations
 from auto_summarization.domain.analyze_type import AnalysisCategory, AnalysisChoice
 from auto_summarization.domain.session import AnalysisSession
 from sqlalchemy import JSON, Column, Float, ForeignKey, Integer, MetaData, String, Table, Text
+from sqlalchemy import Column, ForeignKey, Integer, MetaData, String, Table, Text
 from sqlalchemy.orm import registry, relationship
 
 metadata = MetaData()
