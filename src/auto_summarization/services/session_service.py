@@ -27,6 +27,21 @@ class SessionService:
             sessions = repository.list_for_user(owner)
             return [self._serialize_summary(session) for session in sessions]
 
+    def search_sessions(self, user_id: Optional[str], query: str) -> List[Dict[str, Any]]:
+        owner = self._require_user(user_id)
+        normalized_query = query.strip().lower()
+        with session_scope() as db:
+            repository = SessionRepository(db)
+            sessions = repository.list_for_user(owner)
+            if not normalized_query:
+                return [self._serialize_summary(session) for session in sessions]
+            matched: List[Dict[str, Any]] = []
+            for session in sessions:
+                haystacks = (session.title or "", session.text or "")
+                if any(normalized_query in item.lower() for item in haystacks if item):
+                    matched.append(self._serialize_summary(session))
+            return matched
+
     def create_session(
         self,
         user_id: Optional[str],

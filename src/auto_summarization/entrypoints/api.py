@@ -29,4 +29,4 @@ prefix = settings.AUTO_SUMMARIZATION_URL_PREFIX
 app.include_router(analyze_types.router, prefix=prefix, tags=["analyze-types"])
 app.include_router(document.router, prefix=prefix, tags=["documents"])
 app.include_router(analysis.router, prefix=prefix, tags=["analysis"])
-app.include_router(sessions.router, prefix=prefix, tags=["sessions"])
+app.include_router(sessions.router, prefix=prefix, tags=["chat_session"])
