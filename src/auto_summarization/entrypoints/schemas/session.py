@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, root_validator, validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from auto_summarization.entrypoints.schemas.analysis import AnalyzeResponse
 
@@ -21,11 +21,13 @@ class UpdateTranslationRequest(BaseModel):
     choices: Optional[List[int]] = None
     version: Optional[int] = None
 
-    @root_validator
-    def _ensure_payload(cls, values: dict) -> dict:
-        if not any(values.get(field) is not None for field in ("text", "category", "choices")):
+    @model_validator(mode="after")
+    def _ensure_payload(cls, model: "UpdateTranslationRequest") -> "UpdateTranslationRequest":
+        if not any(
+            getattr(model, field) is not None for field in ("text", "category", "choices")
+        ):
             raise ValueError("Необходимо передать текст, категорию или варианты выбора для обновления")
-        return values
+        return model
 
 
 class UpdateTitleRequest(BaseModel):
@@ -33,7 +35,8 @@ class UpdateTitleRequest(BaseModel):
     title: str
     version: Optional[int] = None
 
-    @validator("title")
+    @field_validator("title")
+    @classmethod
     def _validate_title(cls, value: str) -> str:
         normalized = value.strip()
         if not normalized:
