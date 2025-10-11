@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable, List, Optional, Tuple
 
-from sqlalchemy import String, cast
+from sqlalchemy import String, cast, or_
 from sqlalchemy.orm import Session
-from sqlalchemy.sql import func
 
 from auto_summarization.domain.analyze_type import AnalysisCategory, AnalysisChoice
 from auto_summarization.domain.session import AnalysisSession
@@ -127,14 +126,16 @@ class SessionRepository(IRepository):
         query: str,
         limit: int,
     ) -> List[AnalysisSession]:
-        pattern = f"%{query.lower()}%"
+        pattern = f"%{query}%"
         return (
             self._db.query(AnalysisSession)
             .filter(AnalysisSession.user_id == user_id)
             .filter(
-                func.lower(AnalysisSession.title).like(pattern)
-                | func.lower(AnalysisSession.text).like(pattern)
-                | func.lower(cast(AnalysisSession.results, String)).like(pattern)
+                or_(
+                    AnalysisSession.title.ilike(pattern),
+                    AnalysisSession.text.ilike(pattern),
+                    cast(AnalysisSession.results, String).ilike(pattern),
+                )
             )
             .order_by(AnalysisSession.updated_at.desc())
             .limit(limit)

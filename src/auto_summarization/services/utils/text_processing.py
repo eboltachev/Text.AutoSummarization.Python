@@ -233,6 +233,13 @@ def _hf_pipeline():
     model_path = Path(settings.AUTO_SUMMARIZATION_HF_MODEL_PATH)
     if not model_path.exists():
         raise FileNotFoundError(f"Hugging Face model path not found: {model_path}")
+    config_path = model_path / "config.json"
+    tokenizer_path = model_path / "tokenizer.json"
+    if not config_path.exists() or not tokenizer_path.exists():
+        raise FileNotFoundError(
+            "Hugging Face model is not fully downloaded. "
+            f"Expected files 'config.json' and 'tokenizer.json' in {model_path}."
+        )
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
     return pipeline("zero-shot-classification", model=model, tokenizer=tokenizer)
