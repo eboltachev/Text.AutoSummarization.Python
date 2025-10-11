@@ -142,6 +142,7 @@ class TestAPI:
         assert re.match(self._id_pattern, data["session_id"])
         assert data["category"] == "Экономика"
         assert "[Универсальная модель]" in data["classifications"]
+        assert "синтетическим обработчиком" not in data["classifications"].lower()
         assert data["summary"] == data["short_summary"]
         assert data["analysis"] == data["full_summary"]
 
@@ -154,7 +155,9 @@ class TestAPI:
         assert response.status_code == 200
         sport_data = response.json()
         assert "[Предобученная модель]" in sport_data["classifications"]
+        assert "синтетическим обработчиком" not in sport_data["classifications"].lower()
         assert isinstance(sport_data["entities"], str)
+        assert "синтетическим обработчиком" not in sport_data["entities"].lower()
 
         cleanup = requests.delete(
             f"{self._api_url}{self._prefix}/user/delete_user",
@@ -209,6 +212,7 @@ class TestAPI:
         assert session.get("category") == "Путешествия"
         assert session.get("summary") == session.get("short_summary")
         assert session.get("analysis") == session.get("full_summary")
+        assert "синтетическим обработчиком" not in session.get("full_summary").lower()
 
         response = requests.get(
             f"{self._api_url}{self._prefix}/session/fetch_page",

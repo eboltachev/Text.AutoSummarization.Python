@@ -137,8 +137,9 @@ def _render_output(
     header = _build_model_header(model_type)
     formatted_text = _format_text(text)
     prompt_line = prompt.strip() if prompt.strip() else "Инструкция не указана."
-    if generated:
-        result_line = generated.strip()
+    if generated is not None:
+        trimmed = generated.strip()
+        result_line = trimmed if trimmed else "Модель вернула пустой ответ."
     elif error:
         result_line = (
             f"Анализ завершился с ошибкой: {error}. Используйте резервный метод или повторите попытку позже."
@@ -181,7 +182,7 @@ def perform_analysis(
         field = CHOICE_FIELD_MAP.get(template["choice_name"].lower())
         if not field:
             continue
-        model_type = template.get("model_type")
+        model_type = (template.get("model_type") or "UNIVERSAL").upper()
         generated_text: str | None = None
         error_message: str | None = None
         if model_type == "UNIVERSAL":
