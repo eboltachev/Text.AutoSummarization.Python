@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Header, Request
 
 from auto_summarization.entrypoints.schemas.session import (
     CreateSessionRequest,
@@ -21,7 +21,10 @@ def get_service() -> SessionService:
     return SessionService()
 
 
-def _extract_user_id(request: Request) -> str | None:
+def _extract_user_id(request: Request, explicit_user_id: str | None = None) -> str | None:
+    if explicit_user_id:
+        return explicit_user_id
+
     header_names = {authorization, "Authorization", "user_id"}
     for header_name in header_names:
         value = request.headers.get(header_name)
@@ -31,8 +34,16 @@ def _extract_user_id(request: Request) -> str | None:
 
 
 @router.get("/sessions", response_model=SessionListResponse)
-async def list_sessions(request: Request, service: SessionService = Depends(get_service)) -> SessionListResponse:
-    user_id = _extract_user_id(request)
+async def list_sessions(
+    request: Request,
+    service: SessionService = Depends(get_service),
+    user_id_header: str | None = Header(
+        default=None,
+        alias="user_id",
+        description="User identifier used to scope stored analysis sessions.",
+    ),
+) -> SessionListResponse:
+    user_id = _extract_user_id(request, user_id_header)
     sessions = service.list_sessions(user_id)
     return SessionListResponse(sessions=[SessionSummary(**item) for item in sessions])
 
@@ -42,8 +53,13 @@ async def create_session(
     payload: CreateSessionRequest,
     request: Request,
     service: SessionService = Depends(get_service),
+    user_id_header: str | None = Header(
+        default=None,
+        alias="user_id",
+        description="User identifier used to scope stored analysis sessions.",
+    ),
 ) -> SessionDetailResponse:
-    user_id = _extract_user_id(request)
+    user_id = _extract_user_id(request, user_id_header)
     session = service.create_session(
         user_id,
         title=payload.title,
@@ -59,8 +75,13 @@ async def get_session(
     session_id: str,
     request: Request,
     service: SessionService = Depends(get_service),
+    user_id_header: str | None = Header(
+        default=None,
+        alias="user_id",
+        description="User identifier used to scope stored analysis sessions.",
+    ),
 ) -> SessionDetailResponse:
-    user_id = _extract_user_id(request)
+    user_id = _extract_user_id(request, user_id_header)
     session = service.get_session(user_id, session_id)
     return SessionDetailResponse(**session)
 
@@ -71,8 +92,13 @@ async def update_session(
     payload: UpdateSessionRequest,
     request: Request,
     service: SessionService = Depends(get_service),
+    user_id_header: str | None = Header(
+        default=None,
+        alias="user_id",
+        description="User identifier used to scope stored analysis sessions.",
+    ),
 ) -> SessionDetailResponse:
-    user_id = _extract_user_id(request)
+    user_id = _extract_user_id(request, user_id_header)
     session = service.update_session(
         user_id,
         session_id,
@@ -90,7 +116,12 @@ async def delete_session(
     session_id: str,
     request: Request,
     service: SessionService = Depends(get_service),
+    user_id_header: str | None = Header(
+        default=None,
+        alias="user_id",
+        description="User identifier used to scope stored analysis sessions.",
+    ),
 ) -> DeleteSessionResponse:
-    user_id = _extract_user_id(request)
+    user_id = _extract_user_id(request, user_id_header)
     service.delete_session(user_id, session_id)
     return DeleteSessionResponse(status="deleted")
