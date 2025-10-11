@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from auto_summarization.entrypoints.routers import analysis, analyze_types, document, sessions
 from auto_summarization.entrypoints.routers import analysis, analyze_types, document
 from auto_summarization.services.config import settings
 
@@ -29,3 +30,4 @@ prefix = settings.AUTO_SUMMARIZATION_URL_PREFIX
 app.include_router(analyze_types.router, prefix=prefix, tags=["analyze-types"])
 app.include_router(document.router, prefix=prefix, tags=["documents"])
 app.include_router(analysis.router, prefix=prefix, tags=["analysis"])
+app.include_router(sessions.router, prefix=prefix, tags=["sessions"])

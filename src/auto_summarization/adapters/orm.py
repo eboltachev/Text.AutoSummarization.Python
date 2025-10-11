@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from auto_summarization.domain.analyze_type import AnalysisCategory, AnalysisChoice
+from auto_summarization.domain.session import AnalysisSession
+from sqlalchemy import JSON, Column, Float, ForeignKey, Integer, MetaData, String, Table, Text
 from sqlalchemy import Column, ForeignKey, Integer, MetaData, String, Table, Text
 from sqlalchemy.orm import registry, relationship
 
@@ -27,6 +29,22 @@ analysis_choices = Table(
 )
 
 
+analysis_sessions = Table(
+    "analysis_sessions",
+    metadata,
+    Column("session_id", String, primary_key=True, autoincrement=False),
+    Column("user_id", String, index=True, nullable=False),
+    Column("title", String, nullable=False),
+    Column("text", Text, nullable=False),
+    Column("category_index", Integer, nullable=False),
+    Column("choice_indexes", JSON, nullable=False),
+    Column("results", JSON, nullable=False),
+    Column("version", Integer, nullable=False),
+    Column("inserted_at", Float, nullable=False),
+    Column("updated_at", Float, nullable=False),
+)
+
+
 def start_mappers() -> None:
     mapper_registry.map_imperatively(
         AnalysisCategory,
@@ -41,3 +59,4 @@ def start_mappers() -> None:
         },
     )
     mapper_registry.map_imperatively(AnalysisChoice, analysis_choices)
+    mapper_registry.map_imperatively(AnalysisSession, analysis_sessions)

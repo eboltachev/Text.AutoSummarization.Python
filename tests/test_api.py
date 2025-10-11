@@ -6,6 +6,8 @@ import pytest
 import requests
 from dotenv import load_dotenv
 
+from tests.conftest import authorization as auth_header
+
 load_dotenv()
 
 
@@ -47,6 +49,7 @@ class TestAPI:
         self._api_port = os.environ.get("AUTO_SUMMARIZATION_API_PORT", 8000)
         self._api_url = f"http://{self._api_host}:{self._api_port}"
         self._prefix = os.environ.get("AUTO_SUMMARIZATION_URL_PREFIX", "/v1")
+        self._user_headers = {auth_header: "tester"}
         self._sample_text = (
             "Компания ООО \"ТехИнвест\" заключила контракт с Иваном Ивановым в Москве. "
             "Телефон +7 999 123-45-67 и почта ivan@example.com используются для связи. "
@@ -152,3 +155,62 @@ class TestAPI:
         response = requests.post(f"{self._api_url}{self._prefix}/analyze", json=payload)
         assert response.status_code == 400
         assert isinstance(response.json().get("detail"), str)
+
+    async def test_sessions_crud(self):
+        payload = {
+            "text": self._sample_text,
+            "category": 0,
+            "choices": [0, 1, 2, 3, 4],
+            "title": "Первая сессия",
+        }
+        create = requests.post(
+            f"{self._api_url}{self._prefix}/sessions",
+            json=payload,
+            headers=self._user_headers,
+        )
+        assert create.status_code == 200
+        created = create.json()
+        session_id = created["session_id"]
+
+        listing = requests.get(
+            f"{self._api_url}{self._prefix}/sessions",
+            headers=self._user_headers,
+        )
+        assert listing.status_code == 200
+        listed_ids = [item["session_id"] for item in listing.json()["sessions"]]
+        assert session_id in listed_ids
+
+        detail = requests.get(
+            f"{self._api_url}{self._prefix}/sessions/{session_id}",
+            headers=self._user_headers,
+        )
+        assert detail.status_code == 200
+        detail_json = detail.json()
+        assert detail_json["analysis"]["entities"]
+
+        update_payload = {
+            "title": "Обновленная сессия",
+            "version": detail_json["version"],
+        }
+        update = requests.patch(
+            f"{self._api_url}{self._prefix}/sessions/{session_id}",
+            json=update_payload,
+            headers=self._user_headers,
+        )
+        assert update.status_code == 200
+        update_json = update.json()
+        assert update_json["title"] == "Обновленная сессия"
+        assert update_json["version"] == detail_json["version"] + 1
+
+        delete = requests.delete(
+            f"{self._api_url}{self._prefix}/sessions/{session_id}",
+            headers=self._user_headers,
+        )
+        assert delete.status_code == 200
+        assert delete.json() == {"status": "deleted"}
+
+        missing = requests.get(
+            f"{self._api_url}{self._prefix}/sessions/{session_id}",
+            headers=self._user_headers,
+        )
+        assert missing.status_code == 404
