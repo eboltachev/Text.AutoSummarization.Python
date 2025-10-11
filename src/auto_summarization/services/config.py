@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     @classmethod
     def settings_customise_sources(
         cls,
+        settings_cls,
         init_settings: PydanticBaseSettingsSource,
         env_settings: PydanticBaseSettingsSource,
         dotenv_settings: PydanticBaseSettingsSource,
@@ -35,7 +36,7 @@ class Settings(BaseSettings):
 
         return (
             init_settings,
-            LenientEnvSource(cls),
+            LenientEnvSource(settings_cls),
             dotenv_settings,
             file_secret_settings,
         )
