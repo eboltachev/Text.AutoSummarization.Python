@@ -164,7 +164,7 @@ class TestAPI:
             "title": "Первая сессия",
         }
         create = requests.post(
-            f"{self._api_url}{self._prefix}/sessions",
+            f"{self._api_url}{self._prefix}/chat_session/create",
             json=payload,
             headers=self._user_headers,
         )
@@ -172,45 +172,84 @@ class TestAPI:
         created = create.json()
         session_id = created["session_id"]
 
-        listing = requests.get(
-            f"{self._api_url}{self._prefix}/sessions",
+        page = requests.get(
+            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
             headers=self._user_headers,
         )
-        assert listing.status_code == 200
-        listed_ids = [item["session_id"] for item in listing.json()["sessions"]]
+        assert page.status_code == 200
+        page_json = page.json()
+        listed_ids = [item["session_id"] for item in page_json["sessions"]]
         assert session_id in listed_ids
+        assert page_json["active_session"]["session_id"] == session_id
+        assert page_json["active_session"]["analysis"]["entities"]
 
-        detail = requests.get(
-            f"{self._api_url}{self._prefix}/sessions/{session_id}",
-            headers=self._user_headers,
-        )
-        assert detail.status_code == 200
-        detail_json = detail.json()
-        assert detail_json["analysis"]["entities"]
-
-        update_payload = {
+        title_payload = {
+            "session_id": session_id,
             "title": "Обновленная сессия",
-            "version": detail_json["version"],
+            "version": created["version"],
         }
-        update = requests.patch(
-            f"{self._api_url}{self._prefix}/sessions/{session_id}",
-            json=update_payload,
+        title_update = requests.post(
+            f"{self._api_url}{self._prefix}/chat_session/update_title",
+            json=title_payload,
             headers=self._user_headers,
         )
-        assert update.status_code == 200
-        update_json = update.json()
-        assert update_json["title"] == "Обновленная сессия"
-        assert update_json["version"] == detail_json["version"] + 1
+        assert title_update.status_code == 200
+        title_json = title_update.json()
+        assert title_json["title"] == "Обновленная сессия"
+        assert title_json["version"] == created["version"] + 1
+
+        translation_payload = {
+            "session_id": session_id,
+            "text": self._sample_text + " Дополнение.",
+            "version": title_json["version"],
+        }
+        translation_update = requests.post(
+            f"{self._api_url}{self._prefix}/chat_session/update_translation",
+            json=translation_payload,
+            headers=self._user_headers,
+        )
+        assert translation_update.status_code == 200
+        translation_json = translation_update.json()
+        assert translation_json["version"] == title_json["version"] + 1
+
+        search = requests.post(
+            f"{self._api_url}{self._prefix}/chat_session/search",
+            json={"query": "обновленная"},
+            headers=self._user_headers,
+        )
+        assert search.status_code == 200
+        search_ids = [item["session_id"] for item in search.json()["sessions"]]
+        assert session_id in search_ids
+
+        download_json = requests.get(
+            f"{self._api_url}{self._prefix}/chat_session/download/{session_id}/json",
+            headers=self._user_headers,
+        )
+        assert download_json.status_code == 200
+        assert download_json.headers["content-type"].startswith("application/json")
+        assert "analysis" in download_json.text
+
+        download_txt = requests.get(
+            f"{self._api_url}{self._prefix}/chat_session/download/{session_id}/txt",
+            headers=self._user_headers,
+        )
+        assert download_txt.status_code == 200
+        assert download_txt.headers["content-type"].startswith("text/plain")
+        assert "Дополнение" in download_txt.text
 
         delete = requests.delete(
-            f"{self._api_url}{self._prefix}/sessions/{session_id}",
+            f"{self._api_url}{self._prefix}/chat_session/delete",
             headers=self._user_headers,
+            params={"session_id": session_id},
         )
         assert delete.status_code == 200
         assert delete.json() == {"status": "deleted"}
 
-        missing = requests.get(
-            f"{self._api_url}{self._prefix}/sessions/{session_id}",
+        after_delete = requests.get(
+            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
             headers=self._user_headers,
         )
-        assert missing.status_code == 404
+        assert after_delete.status_code == 200
+        after_json = after_delete.json()
+        assert after_json["sessions"] == []
+        assert after_json["active_session"] is None
