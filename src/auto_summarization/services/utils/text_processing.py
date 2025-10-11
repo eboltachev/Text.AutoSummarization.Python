@@ -28,8 +28,36 @@ def _unique(values: List[str]) -> List[str]:
     return result
 
 
+PERSON_TOKEN_NORMALIZATION_RULES: tuple[tuple[str, str], ...] = (
+    (r"(?i)([А-ЯЁ][а-яё]+?)еем$", r"\1ей"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)аем$", r"\1ай"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)ием$", r"\1ий"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)оем$", r"\1ой"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)ям$", r"\1я"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)ью$", r"\1я"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)ей$", r"\1я"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)ой$", r"\1а"),
+    (r"(?i)([А-ЯЁ][а-яё]+?)(ом|ем|ым)$", r"\1"),
+)
+
+
+def _normalize_person_name(name: str) -> str:
+    cleaned = re.sub(r"[\"'«»“”]", "", name).strip()
+    parts: List[str] = []
+    for token in cleaned.split():
+        stripped = token.strip(",.!?:;()")
+        normalised = stripped
+        for pattern, replacement in PERSON_TOKEN_NORMALIZATION_RULES:
+            if re.search(pattern, stripped):
+                normalised = re.sub(pattern, replacement, stripped)
+                break
+        parts.append(normalised)
+    return " ".join(parts)
+
+
 def extract_entities(text: str) -> Dict[str, List[str]]:
-    persons = re.findall(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\b", text)
+    persons_raw = re.findall(r"\b[А-ЯЁ][а-яё]+\s+[А-ЯЁ][а-яё]+\b", text)
+    persons = [_normalize_person_name(candidate) for candidate in persons_raw]
     organisations = re.findall(r"(?:ООО|ПАО|АО|ЗАО|ОАО|ИП)\s*\"?[A-Za-zА-Яа-я0-9\-\s]+\"?", text)
     locations = re.findall(r"(?:(?:в|из|на)\s+)([А-ЯЁ][а-яё]+)", text)
     phones = re.findall(r"\+?\d[\d\s\-()]{7,}\d", text)
