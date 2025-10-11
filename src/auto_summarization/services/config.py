@@ -7,7 +7,6 @@ from typing import Generator, List
 from uuid import uuid4
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -64,7 +63,7 @@ DB_URI = (
 engine = create_engine(DB_URI)
 metadata.create_all(engine)
 start_mappers()
-SessionFactory = sessionmaker(bind=engine)
+SessionFactory = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @contextmanager
