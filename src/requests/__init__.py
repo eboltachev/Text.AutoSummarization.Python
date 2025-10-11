@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json as _json
+import sys
 import uuid
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 from urllib import request as _request
 from urllib.error import HTTPError, URLError
+
+from . import exceptions as exceptions_module
 
 
 @dataclass
@@ -26,12 +29,8 @@ class Response:
     @property
     def content(self) -> bytes:
         return self._content
-
-
-class exceptions:
-    HTTPError = HTTPError
-    ConnectionError = URLError
-    JSONDecodeError = _json.JSONDecodeError
+sys.modules[f"{__name__}.exceptions"] = exceptions_module
+exceptions = exceptions_module
 
 
 def _perform(method: str, url: str, headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None) -> Response:
