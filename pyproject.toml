@@ -1,7 +1,7 @@
 [project]
-name = "cx-chat"
+name = "auto-summarization-service"
 version = "0.1.0"
-description = "RAG-system chat"
+description = "Auto summarization and text analysis service"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
