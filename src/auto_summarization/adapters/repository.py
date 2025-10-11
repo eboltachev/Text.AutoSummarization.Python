@@ -133,6 +133,7 @@ class SessionRepository(IRepository):
             .filter(AnalysisSession.user_id == user_id)
             .filter(
                 func.lower(AnalysisSession.title).like(pattern)
+                | func.lower(AnalysisSession.text).like(pattern)
                 | func.lower(cast(AnalysisSession.results, String)).like(pattern)
             )
             .order_by(AnalysisSession.updated_at.desc())
