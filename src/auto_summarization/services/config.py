@@ -90,7 +90,7 @@ DB_URI = (
 engine = create_engine(DB_URI)
 metadata.create_all(engine)
 start_mappers()
-session_factory = sessionmaker(bind=create_engine(DB_URI))
+session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 def register_analysis_templates(session: Session = session_factory()):
