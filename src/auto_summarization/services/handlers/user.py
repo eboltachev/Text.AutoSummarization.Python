@@ -23,6 +23,7 @@ def get_user_list(uow: IUoW) -> List[Dict[str, Any]]:
                 "last_used_at": user.last_used_at,
             }
             for user in uow.users.list()
+            if not user.temporary
         ]
     logger.info("finish get_user_list")
     return users

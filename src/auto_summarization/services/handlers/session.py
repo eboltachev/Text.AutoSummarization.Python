@@ -75,9 +75,10 @@ def create_new_session(
     with user_uow:
         user = user_uow.users.get(object_id=user_id)
         if user is None:
+            is_temporary = True if temporary is None else bool(temporary)
             user = User(
                 user_id=user_id,
-                temporary=bool(temporary),
+                temporary=is_temporary,
                 started_using_at=now,
                 last_used_at=now,
                 sessions=[],
