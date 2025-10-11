@@ -22,7 +22,7 @@ docker compose up --build
 - `AUTO_SUMMARIZATION_URL_PREFIX` – префикс API (по умолчанию `/v1`).
 - `AUTO_SUMMARIZATION_API_HOST` / `AUTO_SUMMARIZATION_API_PORT` – адрес и порт сервиса.
 - `AUTO_SUMMARIZATION_DB_*` – параметры подключения к PostgreSQL.
-- `AUTO_SUMMARIZATION_SUPPORTED_FORMATS` – список разрешённых форматов документов.
+- `AUTO_SUMMARIZATION_SUPPORTED_FORMATS` – список разрешённых форматов документов (можно указывать через запятую или в JSON-массиве).
 - `AUTO_SUMMARIZATION_ANALYZE_TYPES_PATH` – путь к конфигурации анализов (монтируется из `analyze_types.json`).
 - `AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH` – путь к директории с моделью `joeddav/xlm-roberta-large-xnli`.
 - `OPENAI_API_HOST` и `OPENAI_API_KEY` – параметры для универсальной модели.

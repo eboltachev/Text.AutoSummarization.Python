@@ -1,4 +1,5 @@
 import json
+from json import JSONDecodeError
 from pathlib import Path
 from typing import List, Tuple
 from uuid import uuid4
@@ -7,17 +8,45 @@ from auto_summarization.adapters.orm import metadata, start_mappers
 from auto_summarization.domain.analysis import AnalysisTemplate
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
+from pydantic_settings.sources import (
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session
 
 
 class Settings(BaseSettings):
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        class LenientEnvSource(EnvSettingsSource):
+            def decode_complex_value(self, field_name, field, value):  # type: ignore[override]
+                try:
+                    return super().decode_complex_value(field_name, field, value)
+                except JSONDecodeError:
+                    return value
+
+        return (
+            init_settings,
+            LenientEnvSource(cls),
+            dotenv_settings,
+            file_secret_settings,
+        )
+
     @field_validator("AUTO_SUMMARIZATION_SUPPORTED_FORMATS", mode="after")
     @classmethod
-    def parse_formats(cls, value: str | List[str]) -> Tuple[str, ...]:
+    def parse_formats(cls, value: str | List[str] | Tuple[str, ...]) -> Tuple[str, ...]:
         if isinstance(value, str):
             formats = [item.strip().lower() for item in value.split(",") if item.strip()]
+        elif isinstance(value, tuple):
+            formats = [str(item).strip().lower() for item in value if str(item).strip()]
         else:
             formats = [str(item).strip().lower() for item in value if str(item).strip()]
         return tuple(sorted(set(formats), key=formats.index))
