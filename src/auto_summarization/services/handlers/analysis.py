@@ -7,6 +7,11 @@ from typing import Dict, Iterable, List, Tuple
 
 from auto_summarization.services.config import settings
 from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW
+from auto_summarization.services.models import (
+    get_category_labels,
+    run_pretrained_classification,
+    run_universal_completion,
+)
 
 CHOICE_FIELD_MAP = {
     "аннотация": "short_summary",
@@ -120,17 +125,35 @@ def _format_text(text: str, max_length: int = 480) -> str:
     return prepared[: max_length - 3] + "..."
 
 
-def _render_output(category: str, choice_name: str, prompt: str, text: str, model_type: str | None) -> str:
+def _render_output(
+    category: str,
+    choice_name: str,
+    prompt: str,
+    text: str,
+    model_type: str | None,
+    generated: str | None = None,
+    error: str | None = None,
+) -> str:
     header = _build_model_header(model_type)
     formatted_text = _format_text(text)
     prompt_line = prompt.strip() if prompt.strip() else "Инструкция не указана."
+    if generated:
+        result_line = generated.strip()
+    elif error:
+        result_line = (
+            f"Анализ завершился с ошибкой: {error}. Используйте резервный метод или повторите попытку позже."
+        )
+    else:
+        result_line = (
+            f"Сгенерированное объяснение: {choice_name} для категории '{category}' сформировано синтетическим обработчиком."
+        )
     return (
         f"{header}\n"
         f"Категория: {category}\n"
         f"Тип анализа: {choice_name}\n"
         f"Инструкция: {prompt_line}\n"
         f"Анализируемый текст: {formatted_text}\n"
-        f"Сгенерированное объяснение: {choice_name} для категории '{category}' сформировано синтетическим обработчиком."
+        f"Результат: {result_line}"
     )
 
 
@@ -158,11 +181,27 @@ def perform_analysis(
         field = CHOICE_FIELD_MAP.get(template["choice_name"].lower())
         if not field:
             continue
+        model_type = template.get("model_type")
+        generated_text: str | None = None
+        error_message: str | None = None
+        if model_type == "UNIVERSAL":
+            try:
+                generated_text = run_universal_completion(template["prompt"], text)
+            except Exception as exc:  # pragma: no cover - network errors are environment specific
+                error_message = f"{exc}"[:400]
+        elif model_type == "PRETRAINED":
+            try:
+                labels = get_category_labels(category)
+                generated_text = run_pretrained_classification(text, labels)
+            except Exception as exc:  # pragma: no cover - model loading/inference failures
+                error_message = f"{exc}"[:400]
         result[field] = _render_output(
             category,
             template["choice_name"],
             template["prompt"],
             text,
-            template.get("model_type"),
+            model_type,
+            generated=generated_text,
+            error=error_message,
         )
     return category, result

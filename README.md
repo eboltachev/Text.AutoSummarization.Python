@@ -26,6 +26,7 @@ docker compose up --build
 - `AUTO_SUMMARIZATION_ANALYZE_TYPES_PATH` – путь к конфигурации анализов (монтируется из `analyze_types.json`).
 - `AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH` – путь к директории с моделью `joeddav/xlm-roberta-large-xnli`.
 - `OPENAI_API_HOST` и `OPENAI_API_KEY` – параметры для универсальной модели.
+- `OPENAI_MODEL_NAME` – имя модели, которое будет запрошено у OpenAI-совместимого сервера (по умолчанию `gpt-4o-mini`).
 
 ## API
 
