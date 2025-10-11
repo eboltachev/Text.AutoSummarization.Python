@@ -23,14 +23,17 @@ class FetchSessionResponse(BaseModel):
 
 class CreateSessionRequest(BaseModel):
     text: str
-    category: str
-    summary: str
-    analysis: str
+    category: int
+    choices: List[int]
     temporary: Optional[bool] = False
 
 
 class CreateSessionResponse(SessionInfo):
-    pass
+    entities: str
+    sentiments: str
+    classifications: str
+    short_summary: str
+    full_summary: str
 
 
 class UpdateSessionSummarizationRequest(BaseModel):

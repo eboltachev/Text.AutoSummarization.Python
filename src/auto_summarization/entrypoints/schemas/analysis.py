@@ -7,20 +7,6 @@ class LoadDocumentResponse(BaseModel):
     text: str
 
 
-class AnalyzeRequest(BaseModel):
-    text: str
-    category: int
-    choices: List[int]
-
-
-class AnalyzeResponse(BaseModel):
-    entities: str
-    sentiments: str
-    classifications: str
-    short_summary: str
-    full_summary: str
-
-
 class AnalyzeTypesResponse(BaseModel):
     categories: List[str]
     choices: List[str]

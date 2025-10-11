@@ -134,7 +134,9 @@ def _render_output(category: str, choice_name: str, prompt: str, text: str, mode
     )
 
 
-def perform_analysis(text: str, category_index: int, choice_indices: Iterable[int], uow: AnalysisTemplateUoW) -> Dict[str, str]:
+def perform_analysis(
+    text: str, category_index: int, choice_indices: Iterable[int], uow: AnalysisTemplateUoW
+) -> Tuple[str, Dict[str, str]]:
     result = DEFAULT_MESSAGES.copy()
     with uow:
         templates = [template.to_dict() for template in uow.templates.list()]
@@ -163,4 +165,4 @@ def perform_analysis(text: str, category_index: int, choice_indices: Iterable[in
             text,
             template.get("model_type"),
         )
-    return result
+    return category, result

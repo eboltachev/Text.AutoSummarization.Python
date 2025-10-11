@@ -3,14 +3,15 @@ from __future__ import annotations
 import logging
 import sys
 from time import time
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List
 from uuid import uuid4
 
 from auto_summarization.domain.enums import StatusType
 from auto_summarization.domain.session import Session
 from auto_summarization.domain.user import User
 from auto_summarization.services.config import settings
-from auto_summarization.services.data.unit_of_work import IUoW
+from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW, IUoW
+from auto_summarization.services.handlers.analysis import perform_analysis
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,21 +48,26 @@ def get_session_list(user_id: str, uow: IUoW) -> List[Dict[str, Any]]:
 def create_new_session(
     user_id: str,
     text: str,
-    category: str,
-    summary: str,
-    analysis: str,
+    category_index: int,
+    choices: Iterable[int],
     temporary: bool | None,
     user_uow: IUoW,
+    analysis_uow: AnalysisTemplateUoW,
 ) -> Dict[str, Any]:
     logger.info("start create_new_session")
+    category, analysis_result = perform_analysis(
+        text=text, category_index=category_index, choice_indices=choices, uow=analysis_uow
+    )
     now = time()
+    summary = analysis_result.get("short_summary", "")
+    full_summary = analysis_result.get("full_summary", "")
     session = Session(
         session_id=str(uuid4()),
         title=f"{category}: {summary[:40]}" if summary else category,
         category=category,
         text=text,
         summary=summary,
-        analysis=analysis,
+        analysis=full_summary,
         version=0,
         inserted_at=now,
         updated_at=now,
@@ -81,7 +87,9 @@ def create_new_session(
         user.update_time(last_used_at=now)
         user_uow.commit()
     logger.info("finish create_new_session")
-    return _session_to_dict(session)
+    response = _session_to_dict(session)
+    response.update(analysis_result)
+    return response
 
 
 def update_session_summarization(

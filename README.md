@@ -6,7 +6,7 @@
 
 - Загрузка документов в форматах `txt`, `doc`, `docx`, `pdf`, `odt` с извлечением текста.
 - Получение доступных типов анализа из файла `analyze_types.json`, который монтируется в контейнер.
-- Выполнение анализа с поддержкой универсальной (OpenAI совместимой) и предобученной (HuggingFace) моделей.
+- Автоматическое выполнение анализа при создании сессии с поддержкой универсальной (OpenAI совместимой) и предобученной (HuggingFace) моделей.
 - Управление пользователями и сессиями: создание пользователей, сохранение результатов анализа, обновление аннотаций и заголовков.
 
 ## Запуск локально
@@ -31,9 +31,8 @@ docker compose up --build
 
 - `POST /v1/analysis/load_document` – загрузка документа, возвращает извлечённый текст.
 - `GET /v1/analysis/analyze_types` – список категорий и доступных вариантов анализа.
-- `POST /v1/analysis/analyze` – выполнение анализа и получение строковых результатов по ключам `entities`, `sentiments`, `classifications`, `short_summary`, `full_summary`.
 - `GET /v1/user/get_users` / `POST /v1/user/create_user` / `DELETE /v1/user/delete_user` – управление пользователями.
-- `GET /v1/session/fetch_page` / `POST /v1/session/create` / `POST /v1/session/update_summarization` / `POST /v1/session/update_title` / `DELETE /v1/session/delete` – управление сессиями анализа.
+- `GET /v1/session/fetch_page` / `POST /v1/session/create` / `POST /v1/session/update_summarization` / `POST /v1/session/update_title` / `DELETE /v1/session/delete` – управление сессиями анализа. Эндпоинт создания принимает текст, индекс категории и выбранные варианты анализа, выполняет обработку и возвращает результаты в строковом виде по ключам `entities`, `sentiments`, `classifications`, `short_summary`, `full_summary`.
 
 ## Тестирование
 

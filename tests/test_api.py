@@ -127,29 +127,41 @@ class TestAPI:
         data = response.json()
         assert "документ" in data.get("text").lower()
 
-    async def test_analyze(self):
+    async def test_session_create_performs_analysis(self):
+        user_id = str(uuid4())
+        headers = {authorization: user_id}
+
         text = "Российский рынок акций вырос на 5%, инвесторы ожидают снижения ставки."
         response = requests.post(
-            f"{self._api_url}{self._prefix}/analysis/analyze",
-            headers=self._headers,
+            f"{self._api_url}{self._prefix}/session/create",
+            headers=headers,
             json={"text": text, "category": 0, "choices": [0, 3, 4]},
         )
         assert response.status_code == 200
         data = response.json()
+        assert re.match(self._id_pattern, data["session_id"])
+        assert data["category"] == "Экономика"
         assert "[Универсальная модель]" in data["classifications"]
-        assert data["short_summary"].startswith("[Универсальная модель]") or data["short_summary"].startswith("[Базовый анализ]")
-        assert isinstance(data["full_summary"], str)
+        assert data["summary"] == data["short_summary"]
+        assert data["analysis"] == data["full_summary"]
 
         sport_text = "Команда одержала победу со счетом 2:1, болельщики были в восторге."
         response = requests.post(
-            f"{self._api_url}{self._prefix}/analysis/analyze",
-            headers=self._headers,
+            f"{self._api_url}{self._prefix}/session/create",
+            headers=headers,
             json={"text": sport_text, "category": 1, "choices": [1, 3]},
         )
         assert response.status_code == 200
-        data = response.json()
-        assert "[Предобученная модель]" in data["classifications"]
-        assert isinstance(data["entities"], str)
+        sport_data = response.json()
+        assert "[Предобученная модель]" in sport_data["classifications"]
+        assert isinstance(sport_data["entities"], str)
+
+        cleanup = requests.delete(
+            f"{self._api_url}{self._prefix}/user/delete_user",
+            json={"user_id": user_id},
+        )
+        assert cleanup.status_code == 200
+        assert cleanup.json().get("status") in {"deleted", "not_found"}
 
     async def test_users_and_sessions(self):
         user_id = self._headers[authorization]
@@ -180,17 +192,10 @@ class TestAPI:
         assert isinstance(info.get("started_using_at"), float)
         assert isinstance(info.get("last_used_at"), float)
 
-        analysis_response = requests.post(
-            f"{self._api_url}{self._prefix}/analysis/analyze",
-            headers=self._headers,
-            json={"text": "Путешествие было незабываемым.", "category": 2, "choices": [0, 4]},
-        ).json()
-
         payload = {
             "text": "Путешествие было незабываемым.",
-            "category": "Путешествия",
-            "summary": analysis_response["short_summary"],
-            "analysis": analysis_response["full_summary"],
+            "category": 2,
+            "choices": [0, 4],
         }
         response = requests.post(
             f"{self._api_url}{self._prefix}/session/create",
@@ -202,6 +207,8 @@ class TestAPI:
         session_id = session.get("session_id")
         assert re.match(self._id_pattern, session_id)
         assert session.get("category") == "Путешествия"
+        assert session.get("summary") == session.get("short_summary")
+        assert session.get("analysis") == session.get("full_summary")
 
         response = requests.get(
             f"{self._api_url}{self._prefix}/session/fetch_page",
@@ -251,3 +258,10 @@ class TestAPI:
         )
         assert response.status_code == 200
         assert response.json().get("sessions") == []
+
+        cleanup = requests.delete(
+            f"{self._api_url}{self._prefix}/user/delete_user",
+            json={"user_id": user_id},
+        )
+        assert cleanup.status_code == 200
+        assert cleanup.json().get("status") in {"deleted", "not_found"}

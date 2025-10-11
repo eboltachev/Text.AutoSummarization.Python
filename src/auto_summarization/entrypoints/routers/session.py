@@ -12,7 +12,7 @@ from auto_summarization.entrypoints.schemas.session import (
 )
 from fastapi import APIRouter, Header, HTTPException
 from auto_summarization.services.config import authorization
-from auto_summarization.services.data.unit_of_work import UserUoW
+from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW, UserUoW
 from auto_summarization.services.handlers.session import (
     create_new_session,
     delete_exist_session,
@@ -39,16 +39,19 @@ async def create(
 ) -> CreateSessionResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
-    session = create_new_session(
-        user_id=auth,
-        text=request.text,
-        category=request.category,
-        summary=request.summary,
-        analysis=request.analysis,
-        temporary=request.temporary,
-        user_uow=UserUoW(),
-    )
-    return CreateSessionResponse(**session)
+    try:
+        session = create_new_session(
+            user_id=auth,
+            text=request.text,
+            category_index=request.category,
+            choices=request.choices,
+            temporary=request.temporary,
+            user_uow=UserUoW(),
+            analysis_uow=AnalysisTemplateUoW(),
+        )
+        return CreateSessionResponse(**session)
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
 
 
 @router.post("/update_summarization", response_model=UpdateSessionSummarizationResponse, status_code=200)
