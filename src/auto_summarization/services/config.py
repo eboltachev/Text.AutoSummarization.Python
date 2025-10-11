@@ -41,7 +41,7 @@ class Settings(BaseSettings):
             file_secret_settings,
         )
 
-    @field_validator("AUTO_SUMMARIZATION_SUPPORTED_FORMATS", mode="after")
+    @field_validator("AUTO_SUMMARIZATION_SUPPORTED_FORMATS", mode="before")
     @classmethod
     def parse_formats(cls, value: str | List[str] | Tuple[str, ...]) -> Tuple[str, ...]:
         if isinstance(value, str):
