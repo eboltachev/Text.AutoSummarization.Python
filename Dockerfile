@@ -5,9 +5,9 @@ WORKDIR /app
 COPY pyproject.toml uv.lock .python-version ./
 
 RUN apt update && \
-	apt install -y curl vim && \
-	pip install --upgrade pip && \
-	pip install uv
+        apt install -y curl vim && \
+        pip install --upgrade pip && \
+        pip install uv
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
@@ -20,6 +20,6 @@ COPY ./src/ ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-dev
 
-ENTRYPOINT uv run uvicorn chat-translation.entrypoints.api:app \
-           --host ${CHAT_TRANSLATION_API_HOST} \
-		   --port ${CHAT_TRANSLATION_API_PORT}
+ENTRYPOINT uv run uvicorn auto_summarization.entrypoints.api:app \
+           --host ${AUTO_SUMMARIZATION_API_HOST} \
+           --port ${AUTO_SUMMARIZATION_API_PORT}
