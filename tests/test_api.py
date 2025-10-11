@@ -49,7 +49,8 @@ class TestAPI:
         self._api_port = os.environ.get("AUTO_SUMMARIZATION_API_PORT", 8000)
         self._api_url = f"http://{self._api_host}:{self._api_port}"
         self._prefix = os.environ.get("AUTO_SUMMARIZATION_URL_PREFIX", "/v1")
-        self._user_headers = {auth_header: "tester"}
+        self._user_id = "tester"
+        self._user_headers = {auth_header: self._user_id}
         self._sample_text = (
             "Компания ООО \"ТехИнвест\" заключила контракт с Иваном Ивановым в Москве. "
             "Телефон +7 999 123-45-67 и почта ivan@example.com используются для связи. "
@@ -82,6 +83,12 @@ class TestAPI:
                     )
                     raise Exception("Setup timeout")
 
+        create_user = requests.post(
+            f"{self._api_url}{self._prefix}/user/create_user",
+            json={"user_id": self._user_id, "display_name": "Test User"},
+        )
+        assert create_user.status_code == 200
+
     def teardown_class(self):
         with open(self._content_file_path, "a", encoding="utf-8") as content_file:
             content_file.write("\n\n**Logs:**\n\n")
@@ -92,6 +99,10 @@ class TestAPI:
                 stdout=content_file,
                 stderr=content_file,
             )
+        requests.delete(
+            f"{self._api_url}{self._prefix}/user/delete_user",
+            json={"user_id": self._user_id},
+        )
         subprocess.run(
             ["docker", "compose", "-f", self._compose_file, "down", "-v"],
             cwd=self._cwd,
@@ -156,7 +167,30 @@ class TestAPI:
         assert response.status_code == 400
         assert isinstance(response.json().get("detail"), str)
 
-    async def test_sessions_crud(self):
+    async def test_users_routes(self):
+        new_user = "qa-user"
+        create = requests.post(
+            f"{self._api_url}{self._prefix}/user/create_user",
+            json={"user_id": new_user, "display_name": "QA User"},
+        )
+        assert create.status_code == 200
+        create_json = create.json()
+        assert create_json["user_id"] == new_user
+        assert create_json["display_name"] == "QA User"
+
+        listing = requests.get(f"{self._api_url}{self._prefix}/user/get_users")
+        assert listing.status_code == 200
+        user_ids = [item["user_id"] for item in listing.json()["users"]]
+        assert new_user in user_ids
+
+        delete = requests.delete(
+            f"{self._api_url}{self._prefix}/user/delete_user",
+            json={"user_id": new_user},
+        )
+        assert delete.status_code == 200
+        assert delete.json()["status"] == "deleted"
+
+    async def test_sessions_flow(self):
         payload = {
             "text": self._sample_text,
             "category": 0,
@@ -175,59 +209,58 @@ class TestAPI:
         page = requests.get(
             f"{self._api_url}{self._prefix}/chat_session/fetch_page",
             headers=self._user_headers,
+            params={"page": 1, "size": 10},
         )
         assert page.status_code == 200
         page_json = page.json()
-        listed_ids = [item["session_id"] for item in page_json["sessions"]]
-        assert session_id in listed_ids
-        assert page_json["active_session"]["session_id"] == session_id
-        assert page_json["active_session"]["analysis"]["entities"]
+        assert session_id in [item["session_id"] for item in page_json["sessions"]]
 
-        title_payload = {
+        detail = requests.get(
+            f"{self._api_url}{self._prefix}/chat_session/download/{session_id}/json",
+            headers=self._user_headers,
+        )
+        assert detail.status_code == 200
+        assert detail.headers["content-type"].startswith("application/json")
+        detail_json = detail.json()
+        assert detail_json["analysis"]["entities"]
+
+        rename_payload = {
             "session_id": session_id,
             "title": "Обновленная сессия",
             "version": created["version"],
         }
-        title_update = requests.post(
+        rename = requests.post(
             f"{self._api_url}{self._prefix}/chat_session/update_title",
-            json=title_payload,
+            json=rename_payload,
             headers=self._user_headers,
         )
-        assert title_update.status_code == 200
-        title_json = title_update.json()
-        assert title_json["title"] == "Обновленная сессия"
-        assert title_json["version"] == created["version"] + 1
+        assert rename.status_code == 200
+        rename_json = rename.json()
+        assert rename_json["title"] == "Обновленная сессия"
+        assert rename_json["version"] == created["version"] + 1
 
-        translation_payload = {
+        update_payload = {
             "session_id": session_id,
-            "text": self._sample_text + " Дополнение.",
-            "version": title_json["version"],
+            "text": self._sample_text + " Дополнительное предложение.",
+            "version": rename_json["version"],
         }
-        translation_update = requests.post(
+        update = requests.post(
             f"{self._api_url}{self._prefix}/chat_session/update_translation",
-            json=translation_payload,
+            json=update_payload,
             headers=self._user_headers,
         )
-        assert translation_update.status_code == 200
-        translation_json = translation_update.json()
-        assert translation_json["version"] == title_json["version"] + 1
+        assert update.status_code == 200
+        update_json = update.json()
+        assert update_json["version"] == rename_json["version"] + 1
+        assert "Дополнительное" in update_json["text"]
 
-        search = requests.post(
+        search = requests.get(
             f"{self._api_url}{self._prefix}/chat_session/search",
-            json={"query": "обновленная"},
             headers=self._user_headers,
+            params={"q": "прибыль"},
         )
         assert search.status_code == 200
-        search_ids = [item["session_id"] for item in search.json()["sessions"]]
-        assert session_id in search_ids
-
-        download_json = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/download/{session_id}/json",
-            headers=self._user_headers,
-        )
-        assert download_json.status_code == 200
-        assert download_json.headers["content-type"].startswith("application/json")
-        assert "analysis" in download_json.text
+        assert session_id in [item["session_id"] for item in search.json()["sessions"]]
 
         download_txt = requests.get(
             f"{self._api_url}{self._prefix}/chat_session/download/{session_id}/txt",
@@ -235,21 +268,20 @@ class TestAPI:
         )
         assert download_txt.status_code == 200
         assert download_txt.headers["content-type"].startswith("text/plain")
-        assert "Дополнение" in download_txt.text
+        assert "Дополнительное предложение" in download_txt.text
 
         delete = requests.delete(
             f"{self._api_url}{self._prefix}/chat_session/delete",
+            json={"session_id": session_id},
             headers=self._user_headers,
-            params={"session_id": session_id},
         )
         assert delete.status_code == 200
         assert delete.json() == {"status": "deleted"}
 
-        after_delete = requests.get(
+        fetch_after_delete = requests.get(
             f"{self._api_url}{self._prefix}/chat_session/fetch_page",
             headers=self._user_headers,
+            params={"page": 1, "size": 10},
         )
-        assert after_delete.status_code == 200
-        after_json = after_delete.json()
-        assert after_json["sessions"] == []
-        assert after_json["active_session"] is None
+        assert fetch_after_delete.status_code == 200
+        assert session_id not in [item["session_id"] for item in fetch_after_delete.json()["sessions"]]

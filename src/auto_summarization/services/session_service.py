@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from fastapi import HTTPException, status
@@ -20,27 +20,20 @@ class SessionService:
         self._analyze_service = analyze_service or AnalyzeService()
         self._max_sessions = settings.AUTO_SUMMARIZATION_MAX_SESSIONS
 
-    def list_sessions(self, user_id: Optional[str]) -> List[Dict[str, Any]]:
+    def fetch_page(
+        self,
+        user_id: Optional[str],
+        *,
+        page: int,
+        size: int,
+    ) -> Tuple[List[Dict[str, Any]], int]:
         owner = self._require_user(user_id)
+        if page < 1 or size < 1:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректные параметры пагинации")
         with session_scope() as db:
             repository = SessionRepository(db)
-            sessions = repository.list_for_user(owner)
-            return [self._serialize_summary(session) for session in sessions]
-
-    def search_sessions(self, user_id: Optional[str], query: str) -> List[Dict[str, Any]]:
-        owner = self._require_user(user_id)
-        normalized_query = query.strip().lower()
-        with session_scope() as db:
-            repository = SessionRepository(db)
-            sessions = repository.list_for_user(owner)
-            if not normalized_query:
-                return [self._serialize_summary(session) for session in sessions]
-            matched: List[Dict[str, Any]] = []
-            for session in sessions:
-                haystacks = (session.title or "", session.text or "")
-                if any(normalized_query in item.lower() for item in haystacks if item):
-                    matched.append(self._serialize_summary(session))
-            return matched
+            items, total = repository.fetch_page_for_user(owner, page=page, size=size)
+            return [self._serialize_summary(session) for session in items], total
 
     def create_session(
         self,
@@ -142,6 +135,75 @@ class SessionService:
             session.updated_at = time.time()
             db.flush()
             return self._serialize_detail(session)
+
+    def update_translation(
+        self,
+        user_id: Optional[str],
+        *,
+        session_id: str,
+        text: Optional[str],
+        category: Optional[int],
+        choices: Optional[List[int]],
+        version: int,
+    ) -> Dict[str, Any]:
+        return self.update_session(
+            user_id,
+            session_id,
+            text=text,
+            category=category,
+            choices=choices,
+            version=version,
+        )
+
+    def rename_session(
+        self,
+        user_id: Optional[str],
+        *,
+        session_id: str,
+        title: str,
+        version: int,
+    ) -> Dict[str, Any]:
+        return self.update_session(user_id, session_id, title=title, version=version)
+
+    def search_sessions(
+        self,
+        user_id: Optional[str],
+        *,
+        query: str,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        owner = self._require_user(user_id)
+        normalized_query = query.strip()
+        if not normalized_query:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Некорректный поисковый запрос")
+        effective_limit = max(1, min(limit, 100))
+        with session_scope() as db:
+            repository = SessionRepository(db)
+            results = repository.search_for_user(owner, query=normalized_query, limit=effective_limit)
+            return [self._serialize_summary(item) for item in results]
+
+    def download_session(
+        self,
+        user_id: Optional[str],
+        *,
+        session_id: str,
+        export_format: str,
+    ) -> Tuple[str, bytes, str]:
+        detail = self.get_session(user_id, session_id)
+        export = export_format.lower()
+        if export == "json":
+            content = json.dumps(detail, ensure_ascii=False, indent=2).encode("utf-8")
+            filename = f"session_{session_id}.json"
+            media_type = "application/json"
+        elif export == "txt":
+            payload = [f"Заголовок: {detail['title']}", "", detail["text"], "", "---", ""]
+            payload.append(json.dumps(detail["analysis"], ensure_ascii=False, indent=2))
+            content = "\n".join(payload).encode("utf-8")
+            filename = f"session_{session_id}.txt"
+            media_type = "text/plain; charset=utf-8"
+        else:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Неподдерживаемый формат выгрузки")
+        return filename, content, media_type
 
     def delete_session(self, user_id: Optional[str], session_id: str) -> None:
         owner = self._require_user(user_id)
