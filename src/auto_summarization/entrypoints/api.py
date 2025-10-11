@@ -7,7 +7,7 @@ from auto_summarization.services import config
 
 class API(FastAPI):
     def __init__(self) -> None:
-        super().__init__(title="Auto Summarization API")
+        super().__init__(title="FastAPI", description="Auto Summarization API")
 
         self.add_middleware(
             CORSMiddleware,

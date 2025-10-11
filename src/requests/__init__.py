@@ -23,6 +23,7 @@ class Response:
     def text(self) -> str:
         return self._content.decode("utf-8", errors="replace")
 
+    @property
     def content(self) -> bytes:
         return self._content
 
@@ -30,6 +31,7 @@ class Response:
 class exceptions:
     HTTPError = HTTPError
     ConnectionError = URLError
+    JSONDecodeError = _json.JSONDecodeError
 
 
 def _perform(method: str, url: str, headers: Optional[Dict[str, str]] = None, data: Optional[bytes] = None) -> Response:
