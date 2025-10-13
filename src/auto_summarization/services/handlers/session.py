@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import logging
+import math
 import sys
+from difflib import SequenceMatcher
+from functools import lru_cache
 from time import time
 from typing import Any, Dict, Iterable, List, Tuple
 from uuid import uuid4
 
+import httpx
+from langchain.chains.summarize import load_summarize_chain
+from langchain.docstore.document import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import ChatOpenAI
 from transformers import AutoTokenizer, pipeline
 
@@ -19,25 +26,122 @@ logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+def _normalize_text(value: str) -> str:
+    if not value:
+        return ""
+    return " ".join(value.lower().split())
+
+
+def _match_score(text_blob: str, query: str) -> float:
+    normalized_blob = _normalize_text(text_blob)
+    normalized_query = _normalize_text(query)
+    if not normalized_blob or not normalized_query:
+        return 0.0
+    matcher_score = SequenceMatcher(None, normalized_blob, normalized_query).ratio()
+    blob_tokens = set(normalized_blob.split())
+    query_tokens = set(normalized_query.split())
+    if not query_tokens:
+        return 0.0
+    overlap_score = len(blob_tokens & query_tokens) / len(query_tokens)
+    return float(max(matcher_score, overlap_score))
+
+
+@lru_cache(maxsize=1)
+def _get_context_window(model_name: str) -> int:
+    """Fetch the context window for the configured model."""
+
+    fallback_window = 4096
+    base_url = settings.OPENAI_API_HOST.rstrip("/")
+    model_path = f"{base_url}/models/{model_name}"
+    try:
+        with httpx.Client(timeout=settings.AUTO_SUMMARIZATION_CONNECTION_TIMEOUT) as client:
+            response = client.get(model_path)
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:  # pragma: no cover - network error path
+        logger.warning("Failed to fetch model metadata for context window: %s", exc)
+        return fallback_window
+
+    def _extract_from_item(item: Dict[str, Any]) -> int | None:
+        for key in ("context_window", "context_length", "max_input_tokens", "max_context", "max_tokens"):
+            value = item.get(key)
+            if isinstance(value, int) and value > 0:
+                return value
+            if isinstance(value, str) and value.isdigit():
+                return int(value)
+        return None
+
+    if isinstance(payload, dict):
+        direct_value = _extract_from_item(payload)
+        if direct_value:
+            return direct_value
+        data = payload.get("data")
+        if isinstance(data, list):
+            for item in data:
+                if isinstance(item, dict) and item.get("id") == model_name:
+                    extracted = _extract_from_item(item)
+                    if extracted:
+                        return extracted
+    return fallback_window
+
+
+def _estimate_token_length(text: str, context_window: int) -> int:
+    if not text:
+        return 0
+    # Approximate 4 characters per token as a conservative heuristic
+    estimated = max(1, math.ceil(len(text) / 4))
+    # Guard against overflow for exceptionally long strings
+    return min(estimated, len(text)) if context_window else estimated
+
+
+def _apply_map_reduce(text: str, context_window: int) -> str:
+    chunk_size = max(200, context_window * 4)
+    chunk_overlap = max(50, int(chunk_size * 0.1))
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
+        length_function=len,
+    )
+    documents = [Document(page_content=chunk) for chunk in splitter.split_text(text)]
+    if len(documents) <= 1:
+        return text
+    llm = _build_llm()
+    chain = load_summarize_chain(llm, chain_type="map_reduce")
+    summary = chain.run(documents)
+    return summary.strip() or text
+
+
 def _extract_message_content(result: Any) -> str:
-    """Normalize LLM responses to plain text."""
+    """Normalize LLM responses to plain text and condense oversized payloads."""
 
     if result is None:
         return ""
     if isinstance(result, str):
-        return result.strip()
-    content = getattr(result, "content", result)
-    if isinstance(content, str):
-        return content.strip()
-    if isinstance(content, list):
-        parts: List[str] = []
-        for item in content:
-            if isinstance(item, dict):
-                parts.append(str(item.get("text", "")))
-            else:
-                parts.append(str(item))
-        return "".join(parts).strip()
-    return str(content).strip()
+        text = result.strip()
+    else:
+        content = getattr(result, "content", result)
+        if isinstance(content, str):
+            text = content.strip()
+        elif isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    parts.append(str(item.get("text", "")))
+                else:
+                    parts.append(str(item))
+            text = "".join(parts).strip()
+        else:
+            text = str(content).strip()
+
+    if not text:
+        return ""
+
+    context_window = _get_context_window(settings.OPENAI_MODEL_NAME)
+    if _estimate_token_length(text, context_window) > context_window:
+        logger.info("Applying map-reduce summarization due to context window overflow")
+        return _apply_map_reduce(text, context_window)
+
+    return text
 
 
 def _normalize_label(output: str, candidates: List[str]) -> str:
@@ -374,3 +478,43 @@ def delete_exist_session(session_id: str, user_id: str, uow: IUoW) -> StatusType
             return StatusType.SUCCESS
     logger.info("finish delete_exist_session")
     return StatusType.ERROR
+
+
+def search_similarity_sessions(user_id: str, query: str, uow: IUoW) -> List[Dict[str, Any]]:
+    logger.info("start search_similarity_sessions")
+    if not query or not query.strip():
+        raise ValueError("Request is empty")
+    results: List[Dict[str, Any]] = []
+    with uow:
+        user = uow.users.get(object_id=user_id)
+        if user is None:
+            raise ValueError("User does not have any sessions")
+        for session in user.get_sessions():
+            parts = [session.title or ""]
+            session_query = getattr(session, "query", None)
+            if session_query:
+                parts.append(session_query or "")
+            text_value = getattr(session, "text", "")
+            if text_value:
+                parts.append(text_value)
+            translation_value = getattr(session, "translation", None)
+            if translation_value:
+                parts.append(translation_value)
+            text_blob = " | ".join(part for part in parts if part)
+            score = _match_score(text_blob, query)
+            if score <= 0:
+                continue
+            results.append(
+                {
+                    "title": session.title or "",
+                    "query": session_query or text_value or "",
+                    "translation": translation_value or "",
+                    "inserted_at": float(session.inserted_at),
+                    "session_id": session.session_id,
+                    "score": float(score),
+                }
+            )
+    results.sort(key=lambda item: item["score"], reverse=True)
+    limited_results = results[:20]
+    logger.info(f"finish search_similarity_sessions, found={len(limited_results)}")
+    return limited_results

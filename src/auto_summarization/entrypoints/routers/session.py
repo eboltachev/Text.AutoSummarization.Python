@@ -4,20 +4,23 @@ from auto_summarization.entrypoints.schemas.session import (
     DeleteSessionRequest,
     DeleteSessionResponse,
     FetchSessionResponse,
+    SearchSessionsResponse,
+    SessionContent,
     SessionInfo,
+    SessionSearchResult,
     UpdateSessionSummarizationRequest,
     UpdateSessionSummarizationResponse,
     UpdateSessionTitleRequest,
     UpdateSessionTitleResponse,
-    SessionContent
 )
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Query
 from auto_summarization.services.config import authorization
 from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW, UserUoW
 from auto_summarization.services.handlers.session import (
     create_new_session,
     delete_exist_session,
     get_session_list,
+    search_similarity_sessions,
     update_session_summarization,
     update_title_session,
 )
@@ -104,3 +107,17 @@ async def delete(
         raise HTTPException(status_code=400, detail="Authorization header is required")
     status = delete_exist_session(session_id=request.session_id, user_id=auth, uow=UserUoW())
     return DeleteSessionResponse(status=status)
+
+
+@router.get("/search", response_model=SearchSessionsResponse, status_code=200)
+async def similarity_sessions(
+    query: str = Query(..., min_length=1),
+    auth: str = Header(default=None, alias=authorization),
+) -> SearchSessionsResponse:
+    if auth is None:
+        raise HTTPException(status_code=400, detail="Authorization header is required")
+    try:
+        results = search_similarity_sessions(user_id=auth, query=query, uow=UserUoW())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return SearchSessionsResponse(results=[SessionSearchResult(**item) for item in results])
