@@ -1,4 +1,5 @@
 import json
+import logging
 from json import JSONDecodeError
 from pathlib import Path
 from typing import List, Tuple
@@ -12,9 +13,12 @@ from pydantic_settings.sources import (
     EnvSettingsSource,
     PydanticBaseSettingsSource,
 )
+from pydantic_settings.sources.providers.dotenv import DotEnvSettingsSource
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -34,10 +38,41 @@ class Settings(BaseSettings):
                 except JSONDecodeError:
                     return value
 
+        class LenientDotEnvSource(DotEnvSettingsSource):
+            def decode_complex_value(self, field_name, field, value):  # type: ignore[override]
+                try:
+                    return super().decode_complex_value(field_name, field, value)
+                except JSONDecodeError:
+                    return value
+
+        lenient_env = LenientEnvSource(
+            settings_cls,
+            case_sensitive=getattr(env_settings, "case_sensitive", None),
+            env_prefix=getattr(env_settings, "env_prefix", None),
+            env_nested_delimiter=getattr(env_settings, "env_nested_delimiter", None),
+            env_nested_max_split=getattr(env_settings, "env_nested_max_split", None),
+            env_ignore_empty=getattr(env_settings, "env_ignore_empty", None),
+            env_parse_none_str=getattr(env_settings, "env_parse_none_str", None),
+            env_parse_enums=getattr(env_settings, "env_parse_enums", None),
+        )
+
+        lenient_dotenv = LenientDotEnvSource(
+            settings_cls,
+            env_file=getattr(dotenv_settings, "env_file", None),
+            env_file_encoding=getattr(dotenv_settings, "env_file_encoding", None),
+            case_sensitive=getattr(dotenv_settings, "case_sensitive", None),
+            env_prefix=getattr(dotenv_settings, "env_prefix", None),
+            env_nested_delimiter=getattr(dotenv_settings, "env_nested_delimiter", None),
+            env_nested_max_split=getattr(dotenv_settings, "env_nested_max_split", None),
+            env_ignore_empty=getattr(dotenv_settings, "env_ignore_empty", None),
+            env_parse_none_str=getattr(dotenv_settings, "env_parse_none_str", None),
+            env_parse_enums=getattr(dotenv_settings, "env_parse_enums", None),
+        )
+
         return (
             init_settings,
-            LenientEnvSource(settings_cls),
-            dotenv_settings,
+            lenient_env,
+            lenient_dotenv,
             file_secret_settings,
         )
 
@@ -74,9 +109,13 @@ class Settings(BaseSettings):
     AUTO_SUMMARIZATION_DB_PORT: int = Field(default=5432, description="DB port")
     AUTO_SUMMARIZATION_DB_NAME: str = Field(default="autosummarization", description="DB name")
     AUTO_SUMMARIZATION_DB_USER: str = Field(default="autosummary", description="DB user")
-    AUTO_SUMMARIZATION_DB_PASSWORD: str = Field(description="DB password")
-    OPENAI_API_HOST: str = Field(default="http://localhost:8000/v1", description="OpenAI compatible endpoint")
-    OPENAI_API_KEY: str = Field(description="API key for universal model")
+    AUTO_SUMMARIZATION_DB_PASSWORD: str | None = Field(
+        default=None, description="DB password (optional for local development)"
+    )
+    OPENAI_API_HOST: str = Field(
+        default="http://localhost:8000/v1", description="OpenAI compatible endpoint"
+    )
+    OPENAI_API_KEY: str | None = Field(default=None, description="API key for universal model")
     OPENAI_MODEL_NAME: str = Field(default="Qwen/Qwen3-4B-AWQ", description="Model name for universal analysis")
     DEBUG: int = Field(default=0, description="Debug mode flag")
 
@@ -90,10 +129,26 @@ class Settings(BaseSettings):
 settings = Settings()
 authorization = "Authorization" if not settings.DEBUG else "user_id"
 
-DB_URI = (
-    f"{settings.AUTO_SUMMARIZATION_DB_TYPE}://{settings.AUTO_SUMMARIZATION_DB_USER}:{settings.AUTO_SUMMARIZATION_DB_PASSWORD}@"
-    f"{settings.AUTO_SUMMARIZATION_DB_HOST}:{settings.AUTO_SUMMARIZATION_DB_PORT}/{settings.AUTO_SUMMARIZATION_DB_NAME}"
-)
+
+def _build_db_uri(config: Settings) -> str:
+    db_type = (config.AUTO_SUMMARIZATION_DB_TYPE or "").lower()
+    if db_type.startswith("sqlite"):
+        db_name = config.AUTO_SUMMARIZATION_DB_NAME
+        if db_name.startswith("sqlite://"):
+            return db_name
+        return f"sqlite:///{db_name}"
+    if config.AUTO_SUMMARIZATION_DB_PASSWORD is None:
+        logger.warning(
+            "Database password is not configured; using an in-memory SQLite database for temporary storage."
+        )
+        return "sqlite:///:memory:"
+    return (
+        f"{config.AUTO_SUMMARIZATION_DB_TYPE}://{config.AUTO_SUMMARIZATION_DB_USER}:{config.AUTO_SUMMARIZATION_DB_PASSWORD}@"
+        f"{config.AUTO_SUMMARIZATION_DB_HOST}:{config.AUTO_SUMMARIZATION_DB_PORT}/{config.AUTO_SUMMARIZATION_DB_NAME}"
+    )
+
+
+DB_URI = _build_db_uri(settings)
 engine = create_engine(DB_URI)
 metadata.create_all(engine)
 start_mappers()
