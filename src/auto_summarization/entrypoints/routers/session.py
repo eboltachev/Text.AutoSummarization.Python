@@ -32,10 +32,13 @@ router = APIRouter()
 async def fetch_page(auth: str = Header(default=None, alias=authorization)) -> FetchSessionResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
-    sessions = [
-        SessionInfo(**session) for session in
-        get_session_list(user_id=auth, uow=UserUoW())
-    ]
+    try:
+        sessions = [
+            SessionInfo(**session) for session in
+            get_session_list(user_id=auth, uow=UserUoW())
+        ]
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     return FetchSessionResponse(sessions=sessions)
 
 
@@ -91,26 +94,17 @@ async def update_title(
 ) -> UpdateSessionTitleResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
-    session = update_title_session(
-        user_id=auth,
-        session_id=request.session_id,
-        title=request.title,
-        version=request.version,
-        user_uow=UserUoW(),
-    )
+    try:
+        session = update_title_session(
+            user_id=auth,
+            session_id=request.session_id,
+            title=request.title,
+            version=request.version,
+            user_uow=UserUoW(),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     return UpdateSessionTitleResponse(**session)
-
-
-@router.delete("/delete", response_model=DeleteSessionResponse, status_code=200)
-async def delete(
-    request: DeleteSessionRequest,
-    auth: str = Header(default=None, alias=authorization),
-) -> DeleteSessionResponse:
-    if auth is None:
-        raise HTTPException(status_code=400, detail="Authorization header is required")
-    status = delete_exist_session(session_id=request.session_id, user_id=auth, uow=UserUoW())
-    return DeleteSessionResponse(status=status)
-
 
 @router.get("/search", response_model=SearchSessionsResponse, status_code=200)
 async def similarity_sessions(
@@ -124,3 +118,19 @@ async def similarity_sessions(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     return SearchSessionsResponse(results=[SessionSearchResult(**item) for item in results])
+
+@router.delete("/delete", response_model=DeleteSessionResponse, status_code=200)
+async def delete(
+    request: DeleteSessionRequest,
+    auth: str = Header(default=None, alias=authorization),
+) -> DeleteSessionResponse:
+    if auth is None:
+        raise HTTPException(status_code=400, detail="Authorization header is required")
+    try:
+        status = delete_exist_session(session_id=request.session_id, user_id=auth, uow=UserUoW())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return DeleteSessionResponse(status=status)
+
+
+
