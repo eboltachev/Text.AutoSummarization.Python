@@ -153,7 +153,7 @@ def _generate_analysis(
                     else:
                         predicted = candidates[0]
                 normalized = _normalize_label(str(predicted), candidates)
-                classifications = f"Классификация\n{normalized}".strip()
+                classifications = f"{normalized}".strip()
             else:
                 if llm is None:
                     llm = _build_llm()
@@ -165,7 +165,7 @@ def _generate_analysis(
                 )
                 response = _extract_message_content(llm.invoke(classification_prompt))
                 predicted = _normalize_label(response, candidates)
-                classifications = f"Классификация\n{predicted}".strip()
+                classifications = f"{predicted}".strip()
             continue
 
         if llm is None:
@@ -173,28 +173,31 @@ def _generate_analysis(
         message_prompt = f"{prompt.strip()}\n\nТекст:\n{text.strip()}"
         response = _extract_message_content(llm.invoke(message_prompt))
         if name == "Аннотация":
-            short_summary = f"Аннотация\n{response}"
+            short_summary = f"{response}"
         elif name == "Объекты":
-            entities = f"Объекты\n{response}"
+            entities = f"{response}"
         elif name == "Тональность":
-            sentiments = f"Тональность\n{response}"
+            sentiments = f"{response}"
         elif name == "Выводы":
-            full_summary = f"Выводыi\n{response}"
+            full_summary = f"{response}"
 
     return short_summary, entities, sentiments, classifications, full_summary, category
 
 def _session_to_dict(session: Session) -> Dict[str, Any]:
     return {
         "session_id": session.session_id,
-        "title": session.title,
-        "category": getattr(session, "category", ""),
-        "text": session.text,
-        "summary": getattr(session, "summary", session.short_summary),
-        "analysis": getattr(session, "analysis", session.full_summary),
         "version": session.version,
+        "title": session.title,
+        "text": session.text,
+        "content": {
+            "short_summary": session.short_summary,
+            "entities": session.entities,
+            "sentiments": session.sentiments,
+            "classifications": session.classifications,
+            "full_summary": session.full_summary,
+        },
         "inserted_at": session.inserted_at,
         "updated_at": session.updated_at,
-        "error": None,
     }
 
 
@@ -250,9 +253,6 @@ def create_new_session(
         inserted_at=now,
         updated_at=now,
     )
-    session.category = category  # type: ignore[attr-defined]
-    session.summary = short_summary  # type: ignore[attr-defined]
-    session.analysis = full_summary  # type: ignore[attr-defined]
     with user_uow:
         user = user_uow.users.get(object_id=user_id)
         if user is None:
@@ -288,7 +288,7 @@ def update_session_summarization(
     version: int,
     user_uow: IUoW,
     analysis_uow: AnalysisTemplateUoW,
-) -> Dict[str, Any]:
+) -> Tuple[Dict[str, Any], str | None]:
     logger.info("start update_session_summarization")
     with user_uow:
         user = user_uow.users.get(object_id=user_id)
@@ -321,21 +321,17 @@ def update_session_summarization(
                 "full_summary": session.full_summary or "",
             },
         )
-
         session.short_summary = short_summary
         session.entities = entities
         session.sentiments = sentiments
         session.classifications = classifications
         session.full_summary = full_summary
-        session.summary = short_summary  # type: ignore[attr-defined]
-        session.analysis = full_summary  # type: ignore[attr-defined]
-        session.category = category  # type: ignore[attr-defined]
         session.version = version + 1
         session.updated_at = now
         user.update_time(last_used_at=now)
         user_uow.commit()
     logger.info("finish update_session_summarization")
-    return _session_to_dict(session)
+    return _session_to_dict(session), None
 
 
 def update_title_session(

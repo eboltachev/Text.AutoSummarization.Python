@@ -9,7 +9,7 @@ from auto_summarization.entrypoints.schemas.session import (
     UpdateSessionSummarizationResponse,
     UpdateSessionTitleRequest,
     UpdateSessionTitleResponse,
-    CreateSessionResult
+    SessionContent
 )
 from fastapi import APIRouter, Header, HTTPException
 from auto_summarization.services.config import authorization
@@ -29,7 +29,10 @@ router = APIRouter()
 async def fetch_page(auth: str = Header(default=None, alias=authorization)) -> FetchSessionResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
-    sessions = [SessionInfo(**session) for session in get_session_list(user_id=auth, uow=UserUoW())]
+    sessions = [
+        SessionInfo(**session) for session in
+        get_session_list(user_id=auth, uow=UserUoW())
+    ]
     return FetchSessionResponse(sessions=sessions)
 
 
@@ -41,7 +44,7 @@ async def create(
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
     try:
-        result, error = create_new_session(
+        content, error = create_new_session(
             user_id=auth,
             text=request.text,
             category_index=request.category,
@@ -50,7 +53,7 @@ async def create(
             user_uow=UserUoW(),
             analysis_uow=AnalysisTemplateUoW(),
         )
-        return CreateSessionResponse(result=CreateSessionResult(**result), error=error)
+        return CreateSessionResponse(content=SessionContent(**content), error=error)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 
@@ -62,15 +65,17 @@ async def update_summarization(
 ) -> UpdateSessionSummarizationResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
-    session = update_session_summarization(
+    content, error = update_session_summarization(
         user_id=auth,
         session_id=request.session_id,
-        summary=request.summary,
-        analysis=request.analysis,
+        text=request.text,
+        category_index=request.category,
+        choices=request.choices,
         version=request.version,
         user_uow=UserUoW(),
+        analysis_uow=AnalysisTemplateUoW(),
     )
-    return UpdateSessionSummarizationResponse(**session)
+    return UpdateSessionSummarizationResponse(content=SessionContent(**content), error=error)
 
 
 @router.post("/update_title", response_model=UpdateSessionTitleResponse, status_code=200)
