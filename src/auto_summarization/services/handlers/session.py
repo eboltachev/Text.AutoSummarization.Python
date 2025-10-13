@@ -372,7 +372,7 @@ def create_new_session(
     text: str,
     category_index: int,
     choices: Iterable[int],
-    temporary: bool | None,
+    temporary: bool,
     user_uow: IUoW,
     analysis_uow: AnalysisTemplateUoW,
 ) -> Tuple[Dict[str, Any], str | None]:
@@ -409,10 +409,9 @@ def create_new_session(
     with user_uow:
         user = user_uow.users.get(object_id=user_id)
         if user is None:
-            is_temporary = True if temporary is None else bool(temporary)
             user = User(
                 user_id=user_id,
-                temporary=is_temporary,
+                temporary=temporary,
                 started_using_at=now,
                 last_used_at=now,
                 sessions=[],

@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 class CreateUserRequest(BaseModel):
     user_id: str
-    temporary: Optional[bool] = None
+    temporary: Optional[bool] = False
 
 
 class CreateUserResponse(BaseModel):

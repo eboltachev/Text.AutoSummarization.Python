@@ -247,7 +247,7 @@ class TestAPI:
         db_user = self._db_fetchone("SELECT user_id, temporary FROM users WHERE user_id = %s", (user_id,))
         assert db_user is not None
         assert db_user["user_id"] == user_id
-        assert db_user["temporary"] is True
+        assert db_user["temporary"] is False
 
         economy_session_id = economy_session.get("session_id")
         db_session = self._db_fetchone(
