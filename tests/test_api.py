@@ -424,6 +424,13 @@ class TestAPI:
         )
         assert response.status_code == 200
         update_content = response.json().get("content") or {}
+        assert set(update_content.keys()) <= {
+            "short_summary",
+            "entities",
+            "sentiments",
+            "classifications",
+            "full_summary",
+        }
         assert isinstance(update_content.get("short_summary"), str)
 
         refreshed_page = requests.get(
@@ -434,6 +441,14 @@ class TestAPI:
         refreshed_session = refreshed_page.json().get("sessions")[0]
         assert refreshed_session["version"] == session_info.get("version") + 1
         assert refreshed_session["content"]["short_summary"] == update_content.get("short_summary")
+
+        stale_update = requests.post(
+            f"{self._api_url}{self._prefix}/chat_session/update_summarization",
+            headers=self._headers,
+            json=update_payload,
+        )
+        assert stale_update.status_code == 400
+        assert "Version mismatch" in stale_update.text
 
         db_session_after_update = self._db_fetchone(
             "SELECT version FROM sessions WHERE session_id = %s",
@@ -507,3 +522,46 @@ class TestAPI:
         )
         assert response.status_code == 400
         assert "Invalid category index" in response.text
+
+
+def test_sanitize_prompt_text_triggers_condensation(monkeypatch):
+    from auto_summarization.services.handlers import session as session_handler
+
+    calls: Dict[str, Any] = {}
+
+    def fake_get_context_window(model_name: str) -> int:
+        calls["window"] = model_name
+        return 100
+
+    def fake_apply_map_reduce(text: str, context_window: int) -> str:
+        calls["map_reduce"] = len(text)
+        return "condensed summary"
+
+    monkeypatch.setattr(session_handler, "_get_context_window", fake_get_context_window)
+    monkeypatch.setattr(session_handler, "_apply_map_reduce", fake_apply_map_reduce)
+
+    long_text = "А" * 5000
+    result = session_handler._sanitize_prompt_text(long_text)
+
+    assert result == "condensed summary"
+    assert calls == {"window": session_handler.settings.OPENAI_MODEL_NAME, "map_reduce": len(long_text)}
+
+
+def test_sanitize_prompt_text_falls_back_to_truncation(monkeypatch):
+    from auto_summarization.services.handlers import session as session_handler
+
+    def fake_get_context_window(model_name: str) -> int:
+        return 50
+
+    def fake_apply_map_reduce(text: str, context_window: int) -> str:
+        return text  # No reduction
+
+    monkeypatch.setattr(session_handler, "_get_context_window", fake_get_context_window)
+    monkeypatch.setattr(session_handler, "_apply_map_reduce", fake_apply_map_reduce)
+
+    long_text = "B" * 10000
+    result = session_handler._sanitize_prompt_text(long_text)
+
+    # For a context window of 50, safe window will be 512 tokens -> char budget 2048
+    assert len(result) <= 2048
+    assert result
