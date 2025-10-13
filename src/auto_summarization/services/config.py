@@ -73,8 +73,8 @@ class Settings(BaseSettings):
     AUTO_SUMMARIZATION_DB_USER: str = Field(default="autosummary", description="DB user")
     AUTO_SUMMARIZATION_DB_PASSWORD: str = Field(description="DB password")
     OPENAI_API_HOST: str = Field(default="http://localhost:8000/v1", description="OpenAI compatible endpoint")
-    OPENAI_API_KEY: str = Field(default="dummy", description="API key for universal model")
-    OPENAI_MODEL_NAME: str = Field(default="gpt-4o-mini", description="Model name for universal analysis")
+    OPENAI_API_KEY: str = Field(description="API key for universal model")
+    OPENAI_MODEL_NAME: str = Field(default="Qwen/Qwen3-4B-AWQ", description="Model name for universal analysis")
     DEBUG: int = Field(default=0, description="Debug mode flag")
 
     class Config:

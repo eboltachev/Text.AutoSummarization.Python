@@ -11,11 +11,9 @@ from auto_summarization.domain.session import Session
 from auto_summarization.domain.user import User
 from auto_summarization.services.config import settings
 from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW, IUoW
-from auto_summarization.services.handlers.analysis import perform_analysis
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 def _session_to_dict(session: Session) -> Dict[str, Any]:
     return {
@@ -55,20 +53,26 @@ def create_new_session(
     analysis_uow: AnalysisTemplateUoW,
 ) -> Dict[str, Any]:
     logger.info("start create_new_session")
-    category, analysis_result = perform_analysis(
-        text=text, category_index=category_index, choice_indices=choices, uow=analysis_uow
-    )
     now = time()
-    summary = analysis_result.get("short_summary", "")
-    full_summary = analysis_result.get("full_summary", "")
+
+    # to-do
+    short_summary = # to-do
+    entities = # to-do
+    sentiments = # to-do
+    classifications = # to-do
+    full_summary = # to-do
+    # to-do
+
     session = Session(
         session_id=str(uuid4()),
-        title=f"{category}: {summary[:40]}" if summary else category,
-        category=category,
-        text=text,
-        summary=summary,
-        analysis=full_summary,
         version=0,
+        title=f"{short_summary[:40]}" or text[:40],
+        text=text,
+        short_summary=short_summary,
+        entities=entities,
+        sentiments=sentiments,
+        classifications=classifications,
+        full_summary=full_summary,
         inserted_at=now,
         updated_at=now,
     )
@@ -88,18 +92,25 @@ def create_new_session(
         user.update_time(last_used_at=now)
         user_uow.commit()
     logger.info("finish create_new_session")
-    response = _session_to_dict(session)
-    response.update(analysis_result)
+    response = {
+        "entities": session.entities,
+        "sentiments": session.sentiments,
+        "classifications": session.classifications,
+        "short_summary": session.short_summary,
+        "full_summary": session.full_summary,
+    }
     return response
 
 
 def update_session_summarization(
     user_id: str,
     session_id: str,
-    summary: str,
-    analysis: str,
+    text: str,
+    category_index: int,
+    choices: Iterable[int],
     version: int,
     user_uow: IUoW,
+    analysis_uow: AnalysisTemplateUoW,
 ) -> Dict[str, Any]:
     logger.info("start update_session_summarization")
     with user_uow:
@@ -112,8 +123,20 @@ def update_session_summarization(
         if int(session.version) != int(version):
             raise ValueError("Version mismatch")
         now = time()
-        session.summary = summary
-        session.analysis = analysis
+
+        # to-do
+        short_summary =  # to-do
+        entities =  # to-do
+        sentiments =  # to-do
+        classifications =  # to-do
+        full_summary =  # to-do
+        # to-do
+
+        session.short_summary = short_summary
+        session.entities = entities
+        session.sentiments = sentiments
+        session.classifications = classifications
+        session.full_summary = full_summary
         session.version = version + 1
         session.updated_at = now
         user.update_time(last_used_at=now)

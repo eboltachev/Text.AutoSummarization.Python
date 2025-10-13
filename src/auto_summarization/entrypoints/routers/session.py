@@ -9,6 +9,7 @@ from auto_summarization.entrypoints.schemas.session import (
     UpdateSessionSummarizationResponse,
     UpdateSessionTitleRequest,
     UpdateSessionTitleResponse,
+    CreateSessionResult
 )
 from fastapi import APIRouter, Header, HTTPException
 from auto_summarization.services.config import authorization
@@ -40,7 +41,7 @@ async def create(
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
     try:
-        session = create_new_session(
+        result, error = create_new_session(
             user_id=auth,
             text=request.text,
             category_index=request.category,
@@ -49,7 +50,7 @@ async def create(
             user_uow=UserUoW(),
             analysis_uow=AnalysisTemplateUoW(),
         )
-        return CreateSessionResponse(**session)
+        return CreateSessionResponse(result=CreateSessionResult(**result), error=error)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 

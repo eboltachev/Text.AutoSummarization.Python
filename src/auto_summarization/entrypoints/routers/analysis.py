@@ -3,7 +3,6 @@ from pathlib import Path
 from fastapi import APIRouter, File, Header, HTTPException, UploadFile
 
 from auto_summarization.entrypoints.schemas.analysis import AnalyzeTypesResponse, LoadDocumentResponse
-from auto_summarization.services.config import authorization
 from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW
 from auto_summarization.services.handlers.analysis import extract_text, get_analyze_types
 
@@ -12,11 +11,8 @@ router = APIRouter()
 
 @router.post("/load_document", response_model=LoadDocumentResponse, status_code=200)
 async def load_document(
-    document: UploadFile = File(...),
-    auth: str = Header(default=None, alias=authorization),
+    document: UploadFile = File(...)
 ) -> LoadDocumentResponse:
-    if auth is None:
-        raise HTTPException(status_code=400, detail="Authorization header is required")
     filename = document.filename or "document.txt"
     suffix = Path(filename).suffix or ".txt"
     try:
