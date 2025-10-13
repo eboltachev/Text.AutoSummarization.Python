@@ -5,3 +5,4 @@ models
 __pycache__
 pyrightconfig.json
 deploy
+models/xlm-roberta-large-xnli/

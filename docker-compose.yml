@@ -7,11 +7,7 @@ services:
       dockerfile: Dockerfile
     volumes:
       - ./dev/debug:/app/debug
-      - type: bind
-        source: ./hf_models
-        target: /app/hf_models
-        bind:
-          create_host_path: true
+      - ./models:/app/models
       - ./analyze_types.json:/app/analyze_types.json:ro
     ports:
       - "${AUTO_SUMMARIZATION_API_PORT}:${AUTO_SUMMARIZATION_API_PORT}"
