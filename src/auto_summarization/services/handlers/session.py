@@ -7,7 +7,7 @@ from typing import Any, Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 from langchain_openai import ChatOpenAI
-from transformers import pipeline
+from transformers import AutoTokenizer, pipeline
 
 from auto_summarization.domain.enums import StatusType
 from auto_summarization.domain.session import Session
@@ -83,15 +83,24 @@ def _build_llm() -> ChatOpenAI:
 
 
 def _ensure_pipeline():
+    tokenizer_kwargs = {"use_fast": False}
     try:
+        tokenizer = AutoTokenizer.from_pretrained(
+            settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH, **tokenizer_kwargs
+        )
         return pipeline(
             "zero-shot-classification",
             model=settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH,
+            tokenizer=tokenizer,
         )
     except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(
+            settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME, **tokenizer_kwargs
+        )
         return pipeline(
             "zero-shot-classification",
             model=settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME,
+            tokenizer=tokenizer,
         )
 
 
