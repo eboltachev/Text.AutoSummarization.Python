@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME: str = Field(
         default="joeddav/xlm-roberta-large-xnli", description="Fallback HuggingFace model name"
     )
+    KNOWLEDGE_BASE_CONNECTION_TIMEOUT: int = Field(
+        default=60, description="Timeout for knowledge base model requests"
+    )
     AUTO_SUMMARIZATION_DB_TYPE: str = Field(default="postgresql", description="DB type")
     AUTO_SUMMARIZATION_DB_HOST: str = Field(default="db", description="DB host")
     AUTO_SUMMARIZATION_DB_PORT: int = Field(default=5432, description="DB port")
