@@ -63,6 +63,9 @@ class Settings(BaseSettings):
     AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH: str = Field(
         default="/app/hf_models/xlm-roberta-large-xnli", description="Mounted HuggingFace model path"
     )
+    AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME: str = Field(
+        default="joeddav/xlm-roberta-large-xnli", description="Fallback HuggingFace model name"
+    )
     AUTO_SUMMARIZATION_DB_TYPE: str = Field(default="postgresql", description="DB type")
     AUTO_SUMMARIZATION_DB_HOST: str = Field(default="db", description="DB host")
     AUTO_SUMMARIZATION_DB_PORT: int = Field(default=5432, description="DB port")

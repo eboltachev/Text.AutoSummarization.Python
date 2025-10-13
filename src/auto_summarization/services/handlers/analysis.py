@@ -9,6 +9,7 @@ from auto_summarization.services.config import settings
 from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW
 from auto_summarization.services.models import (
     get_category_labels,
+    get_pretrained_model_source,
     run_pretrained_classification,
     run_universal_completion,
 )
@@ -114,7 +115,7 @@ def _build_model_header(model_type: str | None) -> str:
     if model_type == "UNIVERSAL":
         return f"[Универсальная модель] Источник: {settings.OPENAI_API_HOST}"
     if model_type == "PRETRAINED":
-        return f"[Предобученная модель] Путь: {settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH}"
+        return f"[Предобученная модель] Источник: {get_pretrained_model_source()}"
     return "[Базовый анализ]"
 
 

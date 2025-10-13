@@ -24,7 +24,8 @@ docker compose up --build
 - `AUTO_SUMMARIZATION_DB_*` – параметры подключения к PostgreSQL.
 - `AUTO_SUMMARIZATION_SUPPORTED_FORMATS` – список разрешённых форматов документов (можно указывать через запятую или в JSON-массиве).
 - `AUTO_SUMMARIZATION_ANALYZE_TYPES_PATH` – путь к конфигурации анализов (монтируется из `analyze_types.json`).
-- `AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH` – путь к директории с моделью `joeddav/xlm-roberta-large-xnli`.
+- `AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH` – путь к директории с моделью `joeddav/xlm-roberta-large-xnli` (если монтируется локально).
+- `AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME` – имя модели HuggingFace для предобученной классификации (используется как запасной вариант при отсутствии локального каталога).
 - `OPENAI_API_HOST` и `OPENAI_API_KEY` – параметры для универсальной модели.
 - `OPENAI_MODEL_NAME` – имя модели, которое будет запрошено у OpenAI-совместимого сервера (по умолчанию `gpt-4o-mini`).
 
