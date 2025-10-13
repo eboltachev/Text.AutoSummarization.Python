@@ -25,5 +25,5 @@ class API(FastAPI):
 app = API()
 prefix = config.settings.AUTO_SUMMARIZATION_URL_PREFIX
 app.include_router(user.router, prefix=f"{prefix}/user", tags=["users"])
-app.include_router(session.router, prefix=f"{prefix}/session", tags=["sessions"])
+app.include_router(session.router, prefix=f"{prefix}/chat_session", tags=["sessions"])
 app.include_router(analysis.router, prefix=f"{prefix}/analysis", tags=["analysis"])

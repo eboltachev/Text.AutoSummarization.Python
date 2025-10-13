@@ -3,6 +3,20 @@ from typing import List, Optional
 from auto_summarization.domain.enums import StatusType
 from pydantic import BaseModel
 
+
+class SessionSearchResult(BaseModel):
+    title: str
+    query: str
+    translation: str
+    inserted_at: float
+    session_id: str
+    score: float
+
+
+class SearchSessionsResponse(BaseModel):
+    results: List[SessionSearchResult]
+
+
 class SessionContent(BaseModel):
     entities: Optional[str]
     sentiments: Optional[str]
