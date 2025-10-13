@@ -55,13 +55,19 @@ def _normalize_label(output: str, candidates: List[str]) -> str:
 def _load_templates(
     category_index: int,
     analysis_uow: AnalysisTemplateUoW,
-) -> Tuple[Dict[int, Any], str]:
+) -> Tuple[Dict[int, Dict[str, Any]], str]:
     with analysis_uow:
         templates = analysis_uow.templates.list_by_category(category_index)
-    if not templates:
-        raise ValueError("Invalid category index")
-    template_map = {template.choice_index: template for template in templates}
-    category = templates[0].category
+        if not templates:
+            raise ValueError("Invalid category index")
+        template_map: Dict[int, Dict[str, Any]] = {}
+        for template in templates:
+            template_map[template.choice_index] = {
+                "choice_name": template.choice_name,
+                "prompt": template.prompt or "",
+                "model_type": (template.model_type or "").upper(),
+            }
+        category = templates[0].category
     return template_map, category
 
 
@@ -111,13 +117,13 @@ def _generate_analysis(
         template = template_map.get(index)
         if template is None:
             continue
-        name = template.choice_name
-        prompt = template.prompt or ""
+        name = template.get("choice_name", "")
+        prompt = template.get("prompt", "")
         if name == "Классификация":
             candidates = [label.strip() for label in prompt.split(",") if label.strip()]
             if not candidates:
                 continue
-            model_type = (template.model_type or "UNIVERSAL").upper()
+            model_type = template.get("model_type") or "UNIVERSAL"
             if model_type == "PRETRAINED":
                 if clf_pipeline is None:
                     clf_pipeline = _ensure_pipeline()
