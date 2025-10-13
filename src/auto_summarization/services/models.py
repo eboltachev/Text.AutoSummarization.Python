@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Iterable, List
 
 from auto_summarization.services.config import settings
@@ -46,10 +47,11 @@ def run_universal_completion(prompt: str, text: str) -> str:
 def _get_zero_shot_pipeline():
     """Load the pre-trained HuggingFace model for zero-shot classification."""
 
+    model_source = get_pretrained_model_source()
     return pipeline(
         "zero-shot-classification",
-        model=settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH,
-        tokenizer=settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH,
+        model=model_source,
+        tokenizer=model_source,
         device=-1,
     )
 
@@ -62,6 +64,15 @@ def run_pretrained_classification(text: str, labels: Iterable[str]) -> str:
     top_label: str = result["labels"][0]
     score: float = float(result["scores"][0])
     return f"{top_label} ({score:.1%})"
+
+
+def get_pretrained_model_source() -> str:
+    """Return a path or model name for the zero-shot classifier."""
+
+    model_path = Path(settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH)
+    if model_path.exists():
+        return str(model_path)
+    return settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME
 
 
 ECONOMY_LABELS: List[str] = [
