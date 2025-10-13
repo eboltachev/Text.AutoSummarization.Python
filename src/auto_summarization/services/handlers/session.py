@@ -6,14 +6,10 @@ import sys
 from difflib import SequenceMatcher
 from functools import lru_cache
 from time import time
-from typing import Any, Dict, Iterable, List, Tuple
+from typing import Any, Dict, Iterable, List, Tuple, TYPE_CHECKING
 from uuid import uuid4
 
 import httpx
-from langchain.chains.summarize import load_summarize_chain
-from langchain.docstore.document import Document
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_openai import ChatOpenAI
 from transformers import AutoTokenizer, pipeline
 
 from auto_summarization.domain.enums import StatusType
@@ -24,6 +20,11 @@ from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW, I
 
 logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from langchain_openai import ChatOpenAI
+else:  # pragma: no cover - runtime fallback when optional dependency is missing
+    ChatOpenAI = Any
 
 
 def _normalize_text(value: str) -> str:
@@ -95,6 +96,16 @@ def _estimate_token_length(text: str, context_window: int) -> int:
 
 
 def _apply_map_reduce(text: str, context_window: int) -> str:
+    try:
+        from langchain.chains.summarize import load_summarize_chain  # type: ignore
+        from langchain.docstore.document import Document  # type: ignore
+        from langchain.text_splitter import RecursiveCharacterTextSplitter  # type: ignore
+    except ModuleNotFoundError:
+        logger.warning(
+            "LangChain is not installed; skipping map-reduce summarization and returning the original text."
+        )
+        return text
+
     chunk_size = max(200, context_window * 4)
     chunk_overlap = max(50, int(chunk_size * 0.1))
     splitter = RecursiveCharacterTextSplitter(
@@ -202,8 +213,17 @@ def _load_templates(
     return template_map, category
 
 
-def _build_llm() -> ChatOpenAI:
-    return ChatOpenAI(
+def _build_llm() -> "ChatOpenAI":
+    if not settings.OPENAI_API_KEY:
+        raise RuntimeError("OPENAI_API_KEY is not configured. Set the environment variable to use the LLM client.")
+    try:
+        from langchain_openai import ChatOpenAI as _ChatOpenAI  # type: ignore
+    except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency path
+        raise RuntimeError(
+            "langchain-openai is required to build the LLM client. Install the 'langchain-openai' package."
+        ) from exc
+
+    return _ChatOpenAI(
         base_url=settings.OPENAI_API_HOST,
         api_key=settings.OPENAI_API_KEY,
         model=settings.OPENAI_MODEL_NAME,

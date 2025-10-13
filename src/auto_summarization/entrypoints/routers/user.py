@@ -25,7 +25,8 @@ async def get_users() -> UsersResponse:
 @router.post("/create_user", response_model=CreateUserResponse, status_code=200)
 async def create_user(request: CreateUserRequest) -> CreateUserResponse:
     try:
-        status = create_new_user(user_id=request.user_id, temporary=request.temporary or False, uow=UserUoW())
+        is_temporary = True if request.temporary is None else bool(request.temporary)
+        status = create_new_user(user_id=request.user_id, temporary=is_temporary, uow=UserUoW())
         return CreateUserResponse(status=status)
     except Exception as error:  # pragma: no cover - defensive branch
         raise HTTPException(status_code=500, detail=str(error))

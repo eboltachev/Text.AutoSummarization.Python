@@ -41,7 +41,7 @@ class CreateSessionRequest(BaseModel):
     text: str
     category: int
     choices: List[int]
-    temporary: Optional[bool] = False
+    temporary: Optional[bool] = None
 
 class CreateSessionResponse(BaseModel):
     content: SessionContent | None
