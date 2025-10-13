@@ -15,6 +15,8 @@ from pydantic_settings.sources import (
 )
 from pydantic_settings.sources.providers.dotenv import DotEnvSettingsSource
 from sqlalchemy import create_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.orm.session import Session
 
@@ -148,9 +150,27 @@ def _build_db_uri(config: Settings) -> str:
     )
 
 
-DB_URI = _build_db_uri(settings)
-engine = create_engine(DB_URI)
-metadata.create_all(engine)
+FALLBACK_SQLITE_URI = "sqlite:///:memory:"
+
+
+def _initialize_engine(primary_uri: str) -> tuple[str, Engine]:
+    engine = create_engine(primary_uri)
+    try:
+        metadata.create_all(engine)
+        return primary_uri, engine
+    except OperationalError as exc:
+        logger.warning(
+            "Unable to initialize database at %s (%s); falling back to SQLite in-memory store.",
+            primary_uri,
+            exc,
+        )
+        engine.dispose()
+        fallback_engine = create_engine(FALLBACK_SQLITE_URI)
+        metadata.create_all(fallback_engine)
+        return FALLBACK_SQLITE_URI, fallback_engine
+
+
+DB_URI, engine = _initialize_engine(_build_db_uri(settings))
 start_mappers()
 session_factory = sessionmaker(bind=engine, expire_on_commit=False)
 
