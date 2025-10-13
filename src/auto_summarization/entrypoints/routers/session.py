@@ -68,16 +68,19 @@ async def update_summarization(
 ) -> UpdateSessionSummarizationResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
-    content, error = update_session_summarization(
-        user_id=auth,
-        session_id=request.session_id,
-        text=request.text,
-        category_index=request.category,
-        choices=request.choices,
-        version=request.version,
-        user_uow=UserUoW(),
-        analysis_uow=AnalysisTemplateUoW(),
-    )
+    try:
+        content, error = update_session_summarization(
+            user_id=auth,
+            session_id=request.session_id,
+            text=request.text,
+            category_index=request.category,
+            choices=request.choices,
+            version=request.version,
+            user_uow=UserUoW(),
+            analysis_uow=AnalysisTemplateUoW(),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
     return UpdateSessionSummarizationResponse(content=SessionContent(**content), error=error)
 
 

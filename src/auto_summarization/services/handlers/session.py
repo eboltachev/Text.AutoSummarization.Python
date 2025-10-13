@@ -111,6 +111,33 @@ def _apply_map_reduce(text: str, context_window: int) -> str:
     return summary.strip() or text
 
 
+def _sanitize_prompt_text(text: str) -> str:
+    """Ensure the text passed to the LLM fits inside the model context window."""
+
+    if not text:
+        return ""
+
+    context_window = _get_context_window(settings.OPENAI_MODEL_NAME)
+    if context_window <= 0:
+        return text
+
+    safe_window = max(512, int(context_window * 0.8))
+    estimated_tokens = _estimate_token_length(text, context_window)
+    if estimated_tokens <= safe_window:
+        return text
+
+    logger.info("Condensing prompt text due to context window overflow")
+    condensed = _apply_map_reduce(text, context_window)
+    condensed = condensed or text
+
+    # If condensation is still too large, truncate to the safe character budget
+    if _estimate_token_length(condensed, context_window) > safe_window:
+        char_budget = safe_window * 4
+        condensed = condensed[:char_budget].strip()
+
+    return condensed or text[: safe_window * 4]
+
+
 def _extract_message_content(result: Any) -> str:
     """Normalize LLM responses to plain text and condense oversized payloads."""
 
@@ -223,6 +250,8 @@ def _generate_analysis(
     classifications = (base_values or {}).get("classifications", "") or ""
     full_summary = (base_values or {}).get("full_summary", "") or ""
 
+    prompt_text = _sanitize_prompt_text(text)
+
     llm: ChatOpenAI | None = None
     clf_pipeline = None
 
@@ -240,7 +269,7 @@ def _generate_analysis(
             if model_type == "PRETRAINED":
                 if clf_pipeline is None:
                     clf_pipeline = _ensure_pipeline()
-                result = clf_pipeline(text, candidate_labels=candidates, multi_label=False)
+                result = clf_pipeline(prompt_text, candidate_labels=candidates, multi_label=False)
                 if isinstance(result, dict):
                     labels = result.get("labels", [])
                     predicted = labels[0] if labels else candidates[0]
@@ -264,7 +293,7 @@ def _generate_analysis(
                 classification_prompt = (
                     "Выбери наиболее подходящую категорию из списка. "
                     f"Варианты: {', '.join(candidates)}.\n\n"
-                    f"Текст:\n{text.strip()}\n\n"
+                    f"Текст:\n{prompt_text.strip()}\n\n"
                     "Ответь только одним вариантом из списка."
                 )
                 response = _extract_message_content(llm.invoke(classification_prompt))
@@ -274,7 +303,7 @@ def _generate_analysis(
 
         if llm is None:
             llm = _build_llm()
-        message_prompt = f"{prompt.strip()}\n\nТекст:\n{text.strip()}"
+        message_prompt = f"{prompt.strip()}\n\nТекст:\n{prompt_text.strip()}"
         response = _extract_message_content(llm.invoke(message_prompt))
         if name == "Аннотация":
             short_summary = f"{response}"
@@ -435,7 +464,14 @@ def update_session_summarization(
         user.update_time(last_used_at=now)
         user_uow.commit()
     logger.info("finish update_session_summarization")
-    return _session_to_dict(session), None
+    response = {
+        "short_summary": session.short_summary,
+        "entities": session.entities,
+        "sentiments": session.sentiments,
+        "classifications": session.classifications,
+        "full_summary": session.full_summary,
+    }
+    return response, None
 
 
 def update_title_session(
