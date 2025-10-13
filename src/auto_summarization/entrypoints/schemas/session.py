@@ -7,7 +7,11 @@ from pydantic import BaseModel
 class SessionSearchResult(BaseModel):
     title: str
     query: str
-    translation: str
+    entities: Optional[str]
+    sentiments: Optional[str]
+    classifications: Optional[str]
+    short_summary: Optional[str]
+    full_summary: Optional[str]
     inserted_at: float
     session_id: str
     score: float

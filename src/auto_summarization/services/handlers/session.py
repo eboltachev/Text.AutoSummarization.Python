@@ -545,16 +545,23 @@ def search_similarity_sessions(user_id: str, query: str, uow: IUoW) -> List[Dict
         if user is None:
             raise ValueError("User does not have any sessions")
         for session in user.get_sessions():
-            parts = [session.title or ""]
+            parts = [
+                session.title or "",
+                session.entities or "",
+                session.sentiments or "",
+                session.classifications or "",
+                session.short_summary or "",
+                session.full_summary or "",
+            ]
             session_query = getattr(session, "query", None)
             if session_query:
                 parts.append(session_query or "")
             text_value = getattr(session, "text", "")
             if text_value:
                 parts.append(text_value)
-            translation_value = getattr(session, "translation", None)
-            if translation_value:
-                parts.append(translation_value)
+            summarization_value = getattr(session, "summarization", None)
+            if summarization_value:
+                parts.append(summarization_value)
             text_blob = " | ".join(part for part in parts if part)
             score = _match_score(text_blob, query)
             if score <= 0:
@@ -563,7 +570,11 @@ def search_similarity_sessions(user_id: str, query: str, uow: IUoW) -> List[Dict
                 {
                     "title": session.title or "",
                     "query": session_query or text_value or "",
-                    "translation": translation_value or "",
+                    "entities": session.entities or "",
+                    "sentiments": session.sentiments or "",
+                    "classifications": session.classifications or "",
+                    "short_summary": session.short_summary or "",
+                    "full_summary": session.full_summary or "",
                     "inserted_at": float(session.inserted_at),
                     "session_id": session.session_id,
                     "score": float(score),
