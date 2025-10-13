@@ -77,7 +77,7 @@ def _build_llm() -> ChatOpenAI:
         api_key=settings.OPENAI_API_KEY,
         model=settings.OPENAI_MODEL_NAME,
         temperature=0,
-        timeout=settings.KNOWLEDGE_BASE_CONNECTION_TIMEOUT,
+        timeout=settings.AUTO_SUMMARIZATION_CONNECTION_TIMEOUT,
         extra_body={"chat_template_kwargs": {"enable_thinking": False}},
     )
 
@@ -153,7 +153,7 @@ def _generate_analysis(
                     else:
                         predicted = candidates[0]
                 normalized = _normalize_label(str(predicted), candidates)
-                classifications = f"[Предобученная модель] {normalized}".strip()
+                classifications = f"Классификация\n{normalized}".strip()
             else:
                 if llm is None:
                     llm = _build_llm()
@@ -165,7 +165,7 @@ def _generate_analysis(
                 )
                 response = _extract_message_content(llm.invoke(classification_prompt))
                 predicted = _normalize_label(response, candidates)
-                classifications = f"[Универсальная модель] {predicted}".strip()
+                classifications = f"Классификация\n{predicted}".strip()
             continue
 
         if llm is None:
@@ -173,13 +173,13 @@ def _generate_analysis(
         message_prompt = f"{prompt.strip()}\n\nТекст:\n{text.strip()}"
         response = _extract_message_content(llm.invoke(message_prompt))
         if name == "Аннотация":
-            short_summary = response
+            short_summary = f"Аннотация\n{response}"
         elif name == "Объекты":
-            entities = response
+            entities = f"Объекты\n{response}"
         elif name == "Тональность":
-            sentiments = response
+            sentiments = f"Тональность\n{response}"
         elif name == "Выводы":
-            full_summary = response
+            full_summary = f"Выводыi\n{response}"
 
     return short_summary, entities, sentiments, classifications, full_summary, category
 
