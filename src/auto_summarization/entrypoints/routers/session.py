@@ -1,3 +1,12 @@
+import base64
+import mimetypes
+import os
+from typing import Literal
+
+from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.background import BackgroundTask
+
 from auto_summarization.entrypoints.schemas.session import (
     CreateSessionRequest,
     CreateSessionResponse,
@@ -13,12 +22,12 @@ from auto_summarization.entrypoints.schemas.session import (
     UpdateSessionTitleRequest,
     UpdateSessionTitleResponse,
 )
-from fastapi import APIRouter, Header, HTTPException, Query
 from auto_summarization.services.config import authorization
 from auto_summarization.services.data.unit_of_work import AnalysisTemplateUoW, UserUoW
 from auto_summarization.services.handlers.session import (
     create_new_session,
     delete_exist_session,
+    download_session_file,
     get_session_list,
     search_similarity_sessions,
     update_session_summarization,
@@ -28,15 +37,21 @@ from auto_summarization.services.handlers.session import (
 router = APIRouter()
 
 
+def _safe_remove(path: os.PathLike[str] | str | None) -> None:
+    if path is None:
+        return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
 @router.get("/fetch_page", response_model=FetchSessionResponse, status_code=200)
 async def fetch_page(auth: str = Header(default=None, alias=authorization)) -> FetchSessionResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
     try:
-        sessions = [
-            SessionInfo(**session) for session in
-            get_session_list(user_id=auth, uow=UserUoW())
-        ]
+        sessions = [SessionInfo(**session) for session in get_session_list(user_id=auth, uow=UserUoW())]
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     return FetchSessionResponse(sessions=sessions)
@@ -106,6 +121,7 @@ async def update_title(
         raise HTTPException(status_code=400, detail=str(error))
     return UpdateSessionTitleResponse(**session)
 
+
 @router.get("/search", response_model=SearchSessionsResponse, status_code=200)
 async def similarity_sessions(
     query: str = Query(..., min_length=1),
@@ -119,6 +135,79 @@ async def similarity_sessions(
         raise HTTPException(status_code=400, detail=str(error))
     return SearchSessionsResponse(results=[SessionSearchResult(**item) for item in results])
 
+
+@router.get(
+    "/download/{session_id}/{format}",
+    responses={
+        200: {
+            "description": "Файл",
+            "content": {
+                "application/octet-stream": {"schema": {"type": "string", "format": "binary"}},
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
+                "text/plain": {"schema": {"type": "string", "format": "binary"}},
+                "application/json": {
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "filename": {"type": "string"},
+                            "content_type": {"type": "string"},
+                            "data": {
+                                "type": "string",
+                                "description": "base64-encoded file",
+                            },
+                        },
+                        "required": ["filename", "content_type", "data"],
+                    }
+                },
+            },
+        }
+    },
+)
+async def download_file(
+    session_id: str,
+    format: Literal["pdf"],
+    auth: str = Header(default=None, alias=authorization),
+    accept: str = Header(default="*/*", alias="Accept"),
+):
+    user_id = auth
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="Bad Request")
+
+    try:
+        path = download_session_file(
+            session_id=session_id,
+            format=format,
+            user_id=user_id,
+            uow=UserUoW(),
+        )
+        file_path = str(path)
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="File not found")
+        filename = f"{session_id}.{format}"
+
+        guessed_type, _ = mimetypes.guess_type(filename)
+        media_type = guessed_type or ("application/pdf" if format.lower() == "pdf" else "application/octet-stream")
+
+        if "application/json" in (accept or "").lower():
+            with open(file_path, "rb") as fh:
+                payload = base64.b64encode(fh.read()).decode("ascii")
+            _safe_remove(file_path)
+            return JSONResponse(
+                content={"filename": filename, "content_type": media_type, "data": payload},
+                headers={"X-Served-For-User": user_id or "", "Access-Control-Expose-Headers": "*"},
+            )
+
+        return FileResponse(
+            path=file_path,
+            media_type=media_type,
+            filename=filename,
+            headers={"X-Served-For-User": user_id or "", "Access-Control-Expose-Headers": "*"},
+            background=BackgroundTask(_safe_remove, file_path),
+        )
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+
+
 @router.delete("/delete", response_model=DeleteSessionResponse, status_code=200)
 async def delete(
     request: DeleteSessionRequest,
@@ -131,6 +220,3 @@ async def delete(
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     return DeleteSessionResponse(status=status)
-
-
-

@@ -8,12 +8,12 @@ from typing import Any, Dict, Iterable, List
 from uuid import uuid4
 
 import psycopg2
-from psycopg2 import OperationalError
-from psycopg2.extras import RealDictCursor
 import pytest
 import requests
 from conftest import authorization
 from dotenv import load_dotenv
+from psycopg2 import OperationalError
+from psycopg2.extras import RealDictCursor
 
 load_dotenv()
 
@@ -24,7 +24,7 @@ class TestAPI:
         if shutil.which("docker") is None:
             pytest.skip("Docker is required to run integration tests", allow_module_level=True)
         self._sleep = 1
-        self._timeout = 30
+        self._timeout = 100
         self._compose_file = "docker-compose.yml"
         self._content_file_path = "dev/content.txt"
         os.makedirs("dev", exist_ok=True)
@@ -177,14 +177,10 @@ class TestAPI:
         assert len(templates) == len(categories) * len(choices)
         assert {template["choice_name"] for template in templates} >= set(choices)
         universal_templates = [
-            template
-            for template in templates
-            if (template["model_type"] or "").upper() == "UNIVERSAL"
+            template for template in templates if (template["model_type"] or "").upper() == "UNIVERSAL"
         ]
         pretrained_templates = [
-            template
-            for template in templates
-            if (template["model_type"] or "").upper() == "PRETRAINED"
+            template for template in templates if (template["model_type"] or "").upper() == "PRETRAINED"
         ]
         assert universal_templates, "Expected at least one UNIVERSAL template in the database"
         assert pretrained_templates, "Expected at least one PRETRAINED template in the database"

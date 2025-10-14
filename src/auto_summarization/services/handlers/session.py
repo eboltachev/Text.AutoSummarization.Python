@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import sys
+import tempfile
+from datetime import datetime
 from difflib import SequenceMatcher
 from functools import lru_cache
+from pathlib import Path
 from time import time
-from typing import Any, Dict, Iterable, List, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, Iterable, List, Tuple
 from uuid import uuid4
 
 import httpx
@@ -101,9 +105,7 @@ def _apply_map_reduce(text: str, context_window: int) -> str:
         from langchain.docstore.document import Document  # type: ignore
         from langchain.text_splitter import RecursiveCharacterTextSplitter  # type: ignore
     except ModuleNotFoundError:
-        logger.warning(
-            "LangChain is not installed; skipping map-reduce summarization and returning the original text."
-        )
+        logger.warning("LangChain is not installed; skipping map-reduce summarization and returning the original text.")
         return text
 
     chunk_size = max(200, context_window * 4)
@@ -236,18 +238,14 @@ def _build_llm() -> "ChatOpenAI":
 def _ensure_pipeline():
     tokenizer_kwargs = {"use_fast": False}
     try:
-        tokenizer = AutoTokenizer.from_pretrained(
-            settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH, **tokenizer_kwargs
-        )
+        tokenizer = AutoTokenizer.from_pretrained(settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH, **tokenizer_kwargs)
         return pipeline(
             "zero-shot-classification",
             model=settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_PATH,
             tokenizer=tokenizer,
         )
     except Exception:
-        tokenizer = AutoTokenizer.from_pretrained(
-            settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME, **tokenizer_kwargs
-        )
+        tokenizer = AutoTokenizer.from_pretrained(settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME, **tokenizer_kwargs)
         return pipeline(
             "zero-shot-classification",
             model=settings.AUTO_SUMMARIZATION_PRETRAINED_MODEL_NAME,
@@ -335,6 +333,7 @@ def _generate_analysis(
             full_summary = f"{response}"
 
     return short_summary, entities, sentiments, classifications, full_summary, category
+
 
 def _session_to_dict(session: Session) -> Dict[str, Any]:
     return {
@@ -518,6 +517,82 @@ def update_title_session(
         user_uow.commit()
     logger.info("finish update_title_session")
     return _session_to_dict(session)
+
+
+def _build_session_pdf(payload: Dict[str, Any]) -> Path:
+    from fpdf import FPDF
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
+    pdf.add_font("DejaVu", "", font_path, uni=True)
+
+    pdf.set_font("DejaVu", "", 16)
+    title = (payload.get("title") or "Экспорт сессии").strip()
+    if not title:
+        title = "Экспорт сессии"
+    pdf.multi_cell(0, 10, title)
+
+    pdf.set_font("DejaVu", "", 11)
+    session_id = payload.get("session_id")
+    if session_id:
+        pdf.cell(0, 8, f"ID сессии: {session_id}", ln=1)
+    pdf.ln(4)
+
+    text_value = payload.get("text")
+    if text_value:
+        pdf.set_font("DejaVu", "", 12)
+        pdf.cell(0, 8, "Исходный текст:", ln=1)
+        pdf.set_font("DejaVu", "", 11)
+        pdf.multi_cell(0, 7, str(text_value))
+        pdf.ln(3)
+
+    content: Dict[str, Any] = payload.get("content") or {}
+    sections = [
+        ("Краткое резюме", content.get("short_summary")),
+        ("Извлеченные сущности", content.get("entities")),
+        ("Тональность", content.get("sentiments")),
+        ("Классификация", content.get("classifications")),
+        ("Полный отчет", content.get("full_summary")),
+    ]
+
+    has_content = False
+    for heading, body in sections:
+        if not body:
+            continue
+        has_content = True
+        pdf.set_font("DejaVu", "", 12)
+        pdf.cell(0, 8, f"{heading}:", ln=1)
+        pdf.set_font("DejaVu", "", 11)
+        pdf.multi_cell(0, 7, str(body))
+        pdf.ln(3)
+
+    if not has_content:
+        pdf.set_font("DejaVu", "", 11)
+        pdf.cell(0, 8, "Для этой сессии пока нет результатов анализа.", ln=1)
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as fp:
+        pdf.output(fp.name)
+    return Path(fp.name)
+
+
+def download_session_file(session_id: str, format: str, user_id: str, uow: IUoW) -> Path:
+    normalized_format = (format or "").strip().lower()
+    if normalized_format != "pdf":
+        raise ValueError("Unsupported format")
+
+    with uow:
+        user = uow.users.get(object_id=user_id)
+        if user is None:
+            raise ValueError("User not found")
+        session = user.get_session(session_id)
+        if session is None:
+            raise ValueError("Session not found")
+        payload = _session_to_dict(session)
+
+    return _build_session_pdf(payload)
 
 
 def delete_exist_session(session_id: str, user_id: str, uow: IUoW) -> StatusType:
