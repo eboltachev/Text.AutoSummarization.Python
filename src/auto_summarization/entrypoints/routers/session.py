@@ -65,7 +65,7 @@ async def create(
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
     try:
-        content, error = create_new_session(
+        session_id, content, error = create_new_session(
             user_id=auth,
             text=request.text,
             category_index=request.category,
@@ -74,7 +74,7 @@ async def create(
             user_uow=UserUoW(),
             analysis_uow=AnalysisTemplateUoW(),
         )
-        return CreateSessionResponse(content=SessionContent(**content), error=error)
+        return CreateSessionResponse(session_id=session_id, content=SessionContent(**content), error=error)
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
 

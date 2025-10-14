@@ -374,7 +374,7 @@ def create_new_session(
     temporary: bool,
     user_uow: IUoW,
     analysis_uow: AnalysisTemplateUoW,
-) -> Tuple[Dict[str, Any], str | None]:
+) -> Tuple[str, Dict[str, Any], str | None]:
     logger.info("start create_new_session")
     now = time()
 
@@ -392,8 +392,9 @@ def create_new_session(
         analysis_uow=analysis_uow,
     )
 
+    session_id = str(uuid4())
     session = Session(
-        session_id=str(uuid4()),
+        session_id=session_id,
         version=0,
         title=f"{short_summary[:40]}" or text[:40],
         text=text,
@@ -427,7 +428,7 @@ def create_new_session(
         "short_summary": session.short_summary,
         "full_summary": session.full_summary,
     }
-    return response, None
+    return session_id, response, None
 
 
 def update_session_summarization(
@@ -522,60 +523,32 @@ def update_title_session(
 def _build_session_pdf(payload: Dict[str, Any]) -> Path:
     from fpdf import FPDF
 
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-
-    font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
-    pdf.add_font("DejaVu", "", font_path, uni=True)
-
-    pdf.set_font("DejaVu", "", 16)
     title = (payload.get("title") or "Экспорт сессии").strip()
-    if not title:
-        title = "Экспорт сессии"
-    pdf.multi_cell(0, 10, title)
-
-    pdf.set_font("DejaVu", "", 11)
-    session_id = payload.get("session_id")
-    if session_id:
-        pdf.cell(0, 8, f"ID сессии: {session_id}", ln=1)
-    pdf.ln(4)
-
-    text_value = payload.get("text")
-    if text_value:
-        pdf.set_font("DejaVu", "", 12)
-        pdf.cell(0, 8, "Исходный текст:", ln=1)
-        pdf.set_font("DejaVu", "", 11)
-        pdf.multi_cell(0, 7, str(text_value))
-        pdf.ln(3)
-
+    query = payload.get("text")
     content: Dict[str, Any] = payload.get("content") or {}
-    sections = [
-        ("Краткое резюме", content.get("short_summary")),
-        ("Извлеченные сущности", content.get("entities")),
-        ("Тональность", content.get("sentiments")),
-        ("Классификация", content.get("classifications")),
-        ("Полный отчет", content.get("full_summary")),
-    ]
-
-    has_content = False
-    for heading, body in sections:
-        if not body:
-            continue
-        has_content = True
-        pdf.set_font("DejaVu", "", 12)
-        pdf.cell(0, 8, f"{heading}:", ln=1)
-        pdf.set_font("DejaVu", "", 11)
-        pdf.multi_cell(0, 7, str(body))
-        pdf.ln(3)
-
-    if not has_content:
-        pdf.set_font("DejaVu", "", 11)
-        pdf.cell(0, 8, "Для этой сессии пока нет результатов анализа.", ln=1)
-
+    summary = "\n".join(
+        [
+            f'Краткое резюме: {content.get("short_summary", "")}',
+            f'Извлеченные сущности: {content.get("entities", "")}',
+            f'Тональность: {content.get("sentiments", "")}',
+            f'Классификация: {content.get("classifications", "")}',
+            f'Полный отчет: {content.get("full_summary", "")}',
+        ]
+    )
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as fp:
+        pdf = FPDF()
+        pdf.add_page()
+        font_path = os.path.join(os.path.dirname(__file__), "fonts", "DejaVuSans.ttf")
+        pdf.add_font("DejaVu", "", font_path, uni=True)
+        pdf.set_font("DejaVu", "", 12)
+        pdf.cell(0, 10, f"Session: {title}", ln=1)
+        pdf.ln(5)
+        pdf.set_font("DejaVu", "", 11)
+        pdf.multi_cell(0, 8, f"Query:\n{query}")
+        pdf.ln(2)
+        pdf.multi_cell(0, 8, f"Summary:\n{summary}")
         pdf.output(fp.name)
-    return Path(fp.name)
+        return Path(fp.name)
 
 
 def download_session_file(session_id: str, format: str, user_id: str, uow: IUoW) -> Path:

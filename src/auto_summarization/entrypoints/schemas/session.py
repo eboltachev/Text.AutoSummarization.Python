@@ -1,7 +1,8 @@
 from typing import List, Optional
 
-from auto_summarization.domain.enums import StatusType
 from pydantic import BaseModel
+
+from auto_summarization.domain.enums import StatusType
 
 
 class SessionSearchResult(BaseModel):
@@ -28,6 +29,7 @@ class SessionContent(BaseModel):
     short_summary: Optional[str]
     full_summary: Optional[str]
 
+
 class SessionInfo(BaseModel):
     session_id: str
     version: int
@@ -36,6 +38,7 @@ class SessionInfo(BaseModel):
     content: SessionContent
     inserted_at: float
     updated_at: float
+
 
 class FetchSessionResponse(BaseModel):
     sessions: List[SessionInfo]
@@ -47,9 +50,12 @@ class CreateSessionRequest(BaseModel):
     choices: List[int]
     temporary: Optional[bool] = False
 
+
 class CreateSessionResponse(BaseModel):
+    session_id: str
     content: SessionContent | None
     error: Optional[str]
+
 
 class UpdateSessionSummarizationRequest(BaseModel):
     session_id: str
@@ -58,20 +64,25 @@ class UpdateSessionSummarizationRequest(BaseModel):
     choices: List[int]
     version: int
 
+
 class UpdateSessionSummarizationResponse(BaseModel):
     content: SessionContent | None
     error: Optional[str]
+
 
 class UpdateSessionTitleRequest(BaseModel):
     session_id: str
     title: str
     version: int
 
+
 class UpdateSessionTitleResponse(SessionInfo):
     pass
 
+
 class DeleteSessionRequest(BaseModel):
     session_id: str
+
 
 class DeleteSessionResponse(BaseModel):
     status: StatusType
