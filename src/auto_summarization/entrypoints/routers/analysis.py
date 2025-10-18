@@ -9,7 +9,7 @@ from auto_summarization.services.handlers.analysis import extract_text, get_anal
 router = APIRouter()
 
 
-@router.post("/load_document", response_model=LoadDocumentResponse, status_code=200)
+@router.post("/load_document", response_model=LoadDocumentResponse, status_code=200, summary="Загрузить документ и извлечь текст")
 async def load_document(
     document: UploadFile = File(...)
 ) -> LoadDocumentResponse:
@@ -25,7 +25,7 @@ async def load_document(
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@router.get("/analyze_types", response_model=AnalyzeTypesResponse, status_code=200)
+@router.get("/analyze_types", response_model=AnalyzeTypesResponse, status_code=200, summary="Справочник типов анализа")
 async def analyze_types() -> AnalyzeTypesResponse:
     categories, choices = get_analyze_types(AnalysisTemplateUoW())
     return AnalyzeTypesResponse(categories=categories, choices=choices)

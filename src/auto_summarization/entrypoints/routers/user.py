@@ -13,7 +13,7 @@ from auto_summarization.services.handlers.user import create_new_user, delete_ex
 router = APIRouter()
 
 
-@router.get("/get_users", response_model=UsersResponse, status_code=200)
+@router.get("/get_users", response_model=UsersResponse, status_code=200, summary="Список пользователей")
 async def get_users() -> UsersResponse:
     try:
         users = [UserInfo(**user) for user in get_user_list(uow=UserUoW())]
@@ -22,7 +22,7 @@ async def get_users() -> UsersResponse:
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@router.post("/create_user", response_model=CreateUserResponse, status_code=200)
+@router.post("/create_user", response_model=CreateUserResponse, status_code=200, summary="Создать пользователя")
 async def create_user(request: CreateUserRequest) -> CreateUserResponse:
     try:
         status = create_new_user(user_id=request.user_id, temporary=request.temporary, uow=UserUoW())
@@ -31,7 +31,7 @@ async def create_user(request: CreateUserRequest) -> CreateUserResponse:
         raise HTTPException(status_code=500, detail=str(error))
 
 
-@router.delete("/delete_user", response_model=DeleteUserResponse, status_code=200)
+@router.delete("/delete_user", response_model=DeleteUserResponse, status_code=200, summary="Удалить пользователя")
 async def delete_user(request: DeleteUserRequest) -> DeleteUserResponse:
     try:
         status = delete_exist_user(request.user_id, UserUoW())
