@@ -93,6 +93,7 @@ class Settings(BaseSettings):
         default=("txt", "doc", "docx", "pdf", "odt"), description="Allowed document formats"
     )
     AUTO_SUMMARIZATION_MAX_SESSIONS: int = Field(default=100, description="Max sessions per user")
+    AUTO_SUMMARIZATION_MAX_TEXT_LENGTH: int = Field(default=100000, description="Max input chars")
     AUTO_SUMMARIZATION_URL_PREFIX: str = Field(default="/v1", description="API URL prefix")
     AUTO_SUMMARIZATION_ANALYZE_TYPES_PATH: str = Field(
         default="/app/analyze_types.json", description="Path to analyze types configuration"

@@ -14,7 +14,3 @@ class AnalyzeTypesResponse(BaseModel):
 
 class AnalyzeErrorResponse(BaseModel):
     detail: str
-
-
-class LoadDocumentRequest(BaseModel):
-    document: Optional[str]

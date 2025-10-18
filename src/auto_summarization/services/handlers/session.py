@@ -335,8 +335,8 @@ def _generate_analysis(
     return short_summary, entities, sentiments, classifications, full_summary, category
 
 
-def _session_to_dict(session: Session) -> Dict[str, Any]:
-    return {
+def _session_to_dict(session: Session, short: bool = False) -> Dict[str, Any]:
+    payload = {
         "session_id": session.session_id,
         "version": session.version,
         "title": session.title,
@@ -351,6 +351,10 @@ def _session_to_dict(session: Session) -> Dict[str, Any]:
         "inserted_at": session.inserted_at,
         "updated_at": session.updated_at,
     }
+    if short:
+        payload.pop("text", None)
+        payload.pop("content", None)
+    return payload
 
 
 def get_session_list(user_id: str, uow: IUoW) -> List[Dict[str, Any]]:
@@ -368,6 +372,7 @@ def get_session_list(user_id: str, uow: IUoW) -> List[Dict[str, Any]]:
 
 def create_new_session(
     user_id: str,
+    title: str,
     text: str,
     category_index: int,
     choices: Iterable[int],
@@ -376,6 +381,7 @@ def create_new_session(
     analysis_uow: AnalysisTemplateUoW,
 ) -> Tuple[str, Dict[str, Any], str | None]:
     logger.info("start create_new_session")
+    _validate_text_length(text)
     now = time()
 
     (
@@ -396,7 +402,7 @@ def create_new_session(
     session = Session(
         session_id=session_id,
         version=0,
-        title=f"{short_summary[:40]}" or text[:40],
+        title=title.strip() or f"{short_summary[:40]}" or text[:40],
         text=text,
         short_summary=short_summary,
         entities=entities,
@@ -442,6 +448,7 @@ def update_session_summarization(
     analysis_uow: AnalysisTemplateUoW,
 ) -> Tuple[Dict[str, Any], str | None]:
     logger.info("start update_session_summarization")
+    _validate_text_length(text)
     with user_uow:
         user = user_uow.users.get(object_id=user_id)
         if user is None:
@@ -614,21 +621,26 @@ def search_similarity_sessions(user_id: str, query: str, uow: IUoW) -> List[Dict
             score = _match_score(text_blob, query)
             if score <= 0:
                 continue
-            results.append(
-                {
-                    "title": session.title or "",
-                    "query": session_query or text_value or "",
-                    "entities": session.entities or "",
-                    "sentiments": session.sentiments or "",
-                    "classifications": session.classifications or "",
-                    "short_summary": session.short_summary or "",
-                    "full_summary": session.full_summary or "",
-                    "inserted_at": float(session.inserted_at),
-                    "session_id": session.session_id,
-                    "score": float(score),
-                }
-            )
-    results.sort(key=lambda item: item["score"], reverse=True)
-    limited_results = results[:20]
-    logger.info(f"finish search_similarity_sessions, found={len(limited_results)}")
-    return limited_results
+            results.append((_session_to_dict(session, short=True), score))
+    results.sort(key=lambda item: item[1], reverse=True)
+    results = results[:settings.AUTO_SUMMARIZATION_MAX_SESSIONS]
+    results = [result[0] for result in results]
+    logger.info(f"finish search_similarity_sessions, found={len(results)}")
+    return results
+
+def get_session_info(session_id: str, user_id: str, user_uow: IUoW) -> Dict[str, Any]:
+    with user_uow:
+        user = user_uow.users.get(object_id=user_id)
+        if user is None:
+            raise ValueError("User not found")
+        session = user.get_session(session_id)
+        if session is None:
+            raise ValueError("Session not found")
+        return _session_to_dict(session)
+
+def _validate_text_length(text: str) -> None:
+    max_len = int(settings.AUTO_SUMMARIZATION_MAX_TEXT_LENGTH)
+    if text is None or text == "":
+        raise ValueError("Текст не задан")
+    if len(text) > max_len:
+        raise ValueError(f"Длина одного документа превышает лимит {max_len} символов")

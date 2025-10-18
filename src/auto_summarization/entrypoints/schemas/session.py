@@ -4,31 +4,19 @@ from pydantic import BaseModel
 
 from auto_summarization.domain.enums import StatusType
 
-
-class SessionSearchResult(BaseModel):
-    title: str
-    query: str
-    entities: Optional[str]
-    sentiments: Optional[str]
-    classifications: Optional[str]
-    short_summary: Optional[str]
-    full_summary: Optional[str]
-    inserted_at: float
-    session_id: str
-    score: float
-
-
-class SearchSessionsResponse(BaseModel):
-    results: List[SessionSearchResult]
-
-
 class SessionContent(BaseModel):
-    entities: Optional[str]
-    sentiments: Optional[str]
-    classifications: Optional[str]
-    short_summary: Optional[str]
-    full_summary: Optional[str]
+    entities: str = ""
+    sentiments: str = ""
+    classifications: str = ""
+    short_summary: str = ""
+    full_summary: str = ""
 
+class ShortSessionInfo(BaseModel):
+    session_id: str
+    version: int
+    title: str
+    inserted_at: float
+    updated_at: float
 
 class SessionInfo(BaseModel):
     session_id: str
@@ -39,12 +27,12 @@ class SessionInfo(BaseModel):
     inserted_at: float
     updated_at: float
 
-
 class FetchSessionResponse(BaseModel):
-    sessions: List[SessionInfo]
+    sessions: List[ShortSessionInfo]
 
 
 class CreateSessionRequest(BaseModel):
+    title: str = ""
     text: str
     category: int
     choices: List[int]
@@ -53,7 +41,7 @@ class CreateSessionRequest(BaseModel):
 
 class CreateSessionResponse(BaseModel):
     session_id: str
-    content: SessionContent | None
+    content: SessionContent
     error: Optional[str]
 
 
@@ -66,7 +54,7 @@ class UpdateSessionSummarizationRequest(BaseModel):
 
 
 class UpdateSessionSummarizationResponse(BaseModel):
-    content: SessionContent | None
+    content: SessionContent
     error: Optional[str]
 
 

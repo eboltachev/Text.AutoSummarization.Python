@@ -6,7 +6,6 @@ services:
       context: .
       dockerfile: Dockerfile
     volumes:
-      - ./dev/debug:/app/debug
       - ./models:/app/models
       - ./analyze_types.json:/app/analyze_types.json:ro
     ports:

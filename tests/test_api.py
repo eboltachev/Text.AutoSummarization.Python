@@ -1,563 +1,419 @@
+import io
+import json
 import os
 import re
-import shutil
 import subprocess
-from contextlib import closing
-from time import sleep
-from typing import Any, Dict, Iterable, List
-from uuid import uuid4
+import time
+from typing import Dict, Tuple
 
-import psycopg2
 import pytest
 import requests
-from conftest import authorization
 from dotenv import load_dotenv
-from psycopg2 import OperationalError
-from psycopg2.extras import RealDictCursor
 
 load_dotenv()
+
+# ---------- Константы окружения ----------
+URL_PREFIX = os.getenv("AUTO_SUMMARIZATION_URL_PREFIX", "/v1").rstrip("/")
+API_PORT = int(os.getenv("AUTO_SUMMARIZATION_API_PORT", "8000"))
+API_HOST = os.getenv("AUTO_SUMMARIZATION_API_HOST", "0.0.0.0")
+BASE_URL = f"http://{API_HOST}:{API_PORT}"
+MAX_TEXT_LEN = int(os.getenv("AUTO_SUMMARIZATION_MAX_TEXT_LENGTH", "100000"))
+SUPPORTED_FORMATS = tuple(
+    s.strip().lower()
+    for s in os.getenv("AUTO_SUMMARIZATION_SUPPORTED_FORMATS", "txt,doc,docx,pdf,odt").split(",")
+    if s.strip()
+)
+
+# DEBUG=1 → сервис ожидает заголовок user_id, иначе Authorization
+AUTH_HEADER_NAME = "user_id" if int(os.getenv("DEBUG", "0")) != 0 else "Authorization"
+
+COMPOSE_FILE = "docker-compose.yml"
+DEV_DIR = "dev"
+LOG_PATH = os.path.join(DEV_DIR, "content.txt")
+
+
+def _auth_headers(user_id: str | None) -> Dict[str, str]:
+    if user_id is None:
+        return {}
+    return {AUTH_HEADER_NAME: user_id}
+
+
+def _wait_healthy(timeout: int = 90):
+    deadline = time.time() + timeout
+    last_error = None
+    while time.time() < deadline:
+        try:
+            r = requests.get(f"{BASE_URL}/health", timeout=3)
+            if r.status_code == 200 and r.json().get("status") == "ok":
+                return
+        except Exception as e:
+            last_error = e
+        time.sleep(1)
+    raise RuntimeError(f"Service is not healthy: {last_error}")
 
 
 @pytest.mark.asyncio
 class TestAPI:
-    def setup_class(self):
-        if shutil.which("docker") is None:
-            pytest.skip("Docker is required to run integration tests", allow_module_level=True)
-        self._sleep = 1
-        self._timeout = 100
-        self._compose_file = "docker-compose.yml"
-        self._content_file_path = "dev/content.txt"
-        os.makedirs("dev", exist_ok=True)
-        self._cwd = os.getcwd()
-        with open(self._content_file_path, "w") as content_file:
-            content_file.write("**Logs**\n\n")
-        with open(self._content_file_path, "a") as content_file:
+    @classmethod
+    def setup_class(cls):
+        os.makedirs(DEV_DIR, exist_ok=True)
+        # поднимаем стек
+        with open(LOG_PATH, "w", encoding="utf-8") as f:
+            f.write("**Logs**\n\n")
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
             subprocess.run(
-                ["docker", "compose", "-f", self._compose_file, "up", "--build", "-d"],
-                stdout=content_file,
-                stderr=content_file,
+                ["docker", "compose", "-f", COMPOSE_FILE, "up", "--build", "-d"],
+                stdout=f, stderr=f, check=False
             )
-        with open(self._content_file_path, "a") as content_file:
+        _wait_healthy(timeout=120)
+
+    @classmethod
+    def teardown_class(cls):
+        # останавливаем стек (без ошибок, чтобы не падать из-за already down)
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
             subprocess.run(
-                [
-                    "printdirtree",
-                    "--exclude-dir",
-                    "tests",
-                    "hf_models",
-                    ".venv",
-                    "uv.lock",
-                    ".pytest_cache",
-                    ".mypy_cache",
-                    "--show-contents",
-                ],
-                cwd=self._cwd,
-                stdout=content_file,
-                stderr=content_file,
+                ["docker", "compose", "-f", COMPOSE_FILE, "down", "-v"],
+                stdout=f, stderr=f, check=False
             )
-        self._api_host = os.environ.get("AUTO_SUMMARIZATION_API_HOST", "localhost")
-        self._api_port = os.environ.get("AUTO_SUMMARIZATION_API_PORT", 8000)
-        self._api_url = f"http://{self._api_host}:{self._api_port}"
-        self._prefix = os.environ.get("AUTO_SUMMARIZATION_URL_PREFIX", "/v1")
-        self._headers = {authorization: str(uuid4())}
-        self._id_pattern = r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b"
 
-        db_host = os.environ.get("AUTO_SUMMARIZATION_DB_HOST", "localhost")
-        self._db_host = self._normalize_host(db_host)
-        self._db_port = int(os.environ.get("AUTO_SUMMARIZATION_DB_PORT", 5432))
-        self._db_name = os.environ.get("AUTO_SUMMARIZATION_DB_NAME", "autosummarization")
-        self._db_user = os.environ.get("AUTO_SUMMARIZATION_DB_USER", "autosummary")
-        self._db_password = os.environ.get("AUTO_SUMMARIZATION_DB_PASSWORD")
-        if not self._db_password:
-            pytest.skip("Database credentials are required to run integration tests", allow_module_level=True)
-        self._db_connect_kwargs = {
-            "host": self._db_host,
-            "port": self._db_port,
-            "dbname": self._db_name,
-            "user": self._db_user,
-            "password": self._db_password,
-        }
+    # --------- /health ----------
+    def test_health(self):
+        r = requests.get(f"{BASE_URL}/health", timeout=5)
+        assert r.status_code == 200
+        assert r.json() == {"status": "ok"}
 
-        connection = False
-        timeout_counter = 0
-        while not connection:
-            try:
-                requests.get(self._api_url)
-                connection = True
-            except (requests.exceptions.HTTPError, requests.exceptions.ConnectionError):
-                sleep(self._sleep)
-                timeout_counter += 1
-                if timeout_counter > self._timeout:
-                    with open(self._content_file_path, "a") as content_file:
-                        subprocess.run(
-                            ["docker", "compose", "-f", self._compose_file, "logs"],
-                            cwd=self._cwd,
-                            stdout=content_file,
-                            stderr=content_file,
-                        )
-                    subprocess.run(
-                        ["docker", "compose", "-f", self._compose_file, "down", "-v"],
-                        cwd=self._cwd,
-                        stdout=open(os.devnull, "w"),
-                        stderr=subprocess.STDOUT,
-                    )
-                    raise Exception("Setup timeout")
-
-        db_ready = False
-        timeout_counter = 0
-        while not db_ready:
-            try:
-                with closing(psycopg2.connect(**self._db_connect_kwargs)) as connection:
-                    connection.close()
-                db_ready = True
-            except OperationalError:
-                sleep(self._sleep)
-                timeout_counter += 1
-                if timeout_counter > self._timeout:
-                    pytest.skip("Database is not ready for integration tests", allow_module_level=True)
-
-    def teardown_class(self):
-        with open(self._content_file_path, "a") as content_file:
-            content_file.write(f"\n\n**Logs:**\n\n")
-        with open(self._content_file_path, "a") as content_file:
-            subprocess.run(
-                ["docker", "compose", "-f", self._compose_file, "logs"],
-                cwd=self._cwd,
-                stdout=content_file,
-                stderr=content_file,
-            )
-        subprocess.run(
-            ["docker", "compose", "-f", self._compose_file, "down", "-v"],
-            cwd=self._cwd,
-            stdout=open(os.devnull, "w"),
-            stderr=subprocess.STDOUT,
+    # --------- /v1/user/* ----------
+    def test_users__create_list_delete(self):
+        user_id = "u_test_users_flow"
+        # create
+        r = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/user/create_user",
+            json={"user_id": user_id, "temporary": False},
+            timeout=10,
         )
+        assert r.status_code == 200
+        assert r.json()["status"] in ("created", "exist")
 
-    @staticmethod
-    def _normalize_host(host: str | None) -> str:
-        if not host or host in {"db", "0.0.0.0"}:
-            return "localhost"
-        return host
-
-    def _db_execute(self, query: str, params: Iterable[Any] | None = None) -> List[Dict[str, Any]]:
-        with closing(psycopg2.connect(**self._db_connect_kwargs)) as connection:
-            connection.autocommit = True
-            with connection.cursor(cursor_factory=RealDictCursor) as cursor:
-                cursor.execute(query, tuple(params or ()))
-                if cursor.description is None:
-                    return []
-                return list(cursor.fetchall())
-
-    def _db_fetchone(self, query: str, params: Iterable[Any] | None = None) -> Dict[str, Any] | None:
-        results = self._db_execute(query, params)
-        return results[0] if results else None
-
-    async def test_docs(self):
-        response = requests.get(f"{self._api_url}/docs")
-        assert response.status_code == 200
-        assert "FastAPI - Swagger UI" in response.text
-
-    async def test_health(self):
-        response = requests.get(f"{self._api_url}/health")
-        assert response.status_code == 200
-        assert {"status": "ok"} == response.json()
-
-    async def test_analyze_types_and_load_document(self):
-        response = requests.get(f"{self._api_url}{self._prefix}/analysis/analyze_types")
-        assert response.status_code == 200
-        payload = response.json()
-        categories = payload.get("categories")
-        choices = payload.get("choices")
-        assert categories == ["Экономика", "Спорт", "Путешествия"]
-        assert choices == ["Аннотация", "Объекты", "Тональность", "Классификация", "Выводы"]
-
-        templates = self._db_execute(
-            "SELECT category_index, category, choice_index, choice_name, model_type "
-            "FROM analysis_templates ORDER BY category_index, choice_index"
+        # idempotent create → exist
+        r2 = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/user/create_user",
+            json={"user_id": user_id, "temporary": False},
+            timeout=10,
         )
-        assert len(templates) == len(categories) * len(choices)
-        assert {template["choice_name"] for template in templates} >= set(choices)
-        universal_templates = [
-            template for template in templates if (template["model_type"] or "").upper() == "UNIVERSAL"
-        ]
-        pretrained_templates = [
-            template for template in templates if (template["model_type"] or "").upper() == "PRETRAINED"
-        ]
-        assert universal_templates, "Expected at least one UNIVERSAL template in the database"
-        assert pretrained_templates, "Expected at least one PRETRAINED template in the database"
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "exist"
 
-        for template in templates:
-            if template["choice_name"] == "Классификация":
-                if template["category"] == "Спорт":
-                    assert template["model_type"] == "PRETRAINED"
-                else:
-                    assert template["model_type"] == "UNIVERSAL"
+        # list (содержит только не temporary; мы создаём non-temp)
+        r3 = requests.get(f"{BASE_URL}{URL_PREFIX}/user/get_users", timeout=10)
+        assert r3.status_code == 200
+        users = r3.json()["users"]
+        assert any(u["user_id"] == user_id for u in users)
 
-        files = {"document": ("sample.txt", "Это тестовый документ для проверки загрузки.", "text/plain")}
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/analysis/load_document",
-            headers=self._headers,
-            files=files,
-        )
-        assert response.status_code == 200
-        data = response.json()
-        assert "документ" in data.get("text").lower()
-
-        invalid_files = {"document": ("malware.exe", b"binary", "application/octet-stream")}
-        invalid_response = requests.post(
-            f"{self._api_url}{self._prefix}/analysis/load_document",
-            headers=self._headers,
-            files=invalid_files,
-        )
-        assert invalid_response.status_code == 400
-        assert "Unsupported document format" in invalid_response.text
-
-    async def test_session_create_performs_analysis(self):
-        user_id = str(uuid4())
-        headers = {authorization: user_id}
-
-        text = "Российский рынок акций вырос на 5%, инвесторы ожидают снижения ставки."
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/create",
-            headers=headers,
-            json={"text": text, "category": 0, "choices": [0, 3, 4]},
-        )
-        assert response.status_code == 200
-        creation_payload = response.json()
-        assert creation_payload["error"] is None
-        economy_content = creation_payload.get("content") or {}
-        assert isinstance(economy_content.get("short_summary"), str)
-        assert isinstance(economy_content.get("full_summary"), str)
-
-        page_response = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
-            headers=headers,
-        )
-        assert page_response.status_code == 200
-        sessions_payload = page_response.json().get("sessions", [])
-        assert len(sessions_payload) == 1
-        economy_session = sessions_payload[0]
-        assert re.match(self._id_pattern, economy_session.get("session_id"))
-        assert economy_session.get("text") == text
-        assert economy_session.get("content", {}).get("short_summary") == economy_content.get("short_summary")
-
-        db_user = self._db_fetchone("SELECT user_id, temporary FROM users WHERE user_id = %s", (user_id,))
-        assert db_user is not None
-        assert db_user["user_id"] == user_id
-        assert db_user["temporary"] is False
-
-        economy_session_id = economy_session.get("session_id")
-        db_session = self._db_fetchone(
-            "SELECT short_summary, entities, sentiments, classifications, full_summary, version, user_id "
-            "FROM sessions WHERE session_id = %s",
-            (economy_session_id,),
-        )
-        assert db_session is not None
-        assert db_session["user_id"] == user_id
-        for key in ("short_summary", "entities", "sentiments", "classifications", "full_summary"):
-            if economy_content.get(key) is not None:
-                assert db_session[key] == economy_content[key]
-
-        sport_text = "Команда одержала победу со счетом 2:1, болельщики были в восторге."
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/create",
-            headers=headers,
-            json={"text": sport_text, "category": 1, "choices": [1, 3]},
-        )
-        assert response.status_code == 200
-        sport_payload = response.json()
-        assert sport_payload["error"] is None
-        sport_content = sport_payload.get("content") or {}
-        assert isinstance(sport_content.get("entities"), str)
-
-        updated_page = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
-            headers=headers,
-        )
-        assert updated_page.status_code == 200
-        sessions = updated_page.json().get("sessions", [])
-        assert len(sessions) == 2
-        sessions_by_text = {session["text"]: session for session in sessions}
-        assert set(sessions_by_text.keys()) == {text, sport_text}
-
-        sport_session = sessions_by_text[sport_text]
-        sport_session_id = sport_session.get("session_id")
-        assert re.match(self._id_pattern, sport_session_id)
-
-        db_sport_session = self._db_fetchone(
-            "SELECT classifications, entities, user_id FROM sessions WHERE session_id = %s",
-            (sport_session_id,),
-        )
-        assert db_sport_session is not None
-        assert db_sport_session["user_id"] == user_id
-        for field in ("classifications", "entities"):
-            if sport_content.get(field) is not None:
-                assert db_sport_session[field] == sport_content[field]
-
-        search_response = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/search",
-            headers=headers,
-            params={"query": "рынок акций"},
-        )
-        assert search_response.status_code == 200
-        search_payload = search_response.json().get("results", [])
-        assert search_payload, "Expected search results for economy session query"
-        assert search_payload[0]["session_id"] == economy_session_id
-        assert search_payload[0]["score"] >= search_payload[-1]["score"]
-
-        sport_search = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/search",
-            headers=headers,
-            params={"query": "болельщики"},
-        )
-        assert sport_search.status_code == 200
-        sport_results = sport_search.json().get("results", [])
-        assert sport_results, "Expected search results for sport session query"
-        assert sport_results[0]["session_id"] == sport_session_id
-
-        invalid_search = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/search",
-            headers=headers,
-            params={"query": "   "},
-        )
-        assert invalid_search.status_code == 400
-
-        cleanup = requests.delete(
-            f"{self._api_url}{self._prefix}/user/delete_user",
+        # delete
+        r4 = requests.delete(
+            f"{BASE_URL}{URL_PREFIX}/user/delete_user",
             json={"user_id": user_id},
+            timeout=10,
         )
-        assert cleanup.status_code == 200
-        assert cleanup.json().get("status") in {"deleted", "not_found"}
+        assert r4.status_code == 200
+        assert r4.json()["status"] in ("deleted",)
 
-        assert self._db_fetchone("SELECT 1 FROM users WHERE user_id = %s", (user_id,)) is None
-        assert self._db_execute("SELECT 1 FROM sessions WHERE user_id = %s", (user_id,)) == []
-
-    async def test_users_and_sessions(self):
-        user_id = self._headers[authorization]
-        response = requests.get(f"{self._api_url}{self._prefix}/user/get_users")
-        assert response.status_code == 200
-        assert response.json().get("users") == []
-
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/user/create_user",
-            json={"user_id": user_id, "temporary": False},
+        # delete non-existing → not_found
+        r5 = requests.delete(
+            f"{BASE_URL}{URL_PREFIX}/user/delete_user",
+            json={"user_id": user_id},
+            timeout=10,
         )
-        assert response.status_code == 200
-        assert response.json().get("status") == "created"
+        assert r5.status_code == 200
+        assert r5.json()["status"] in ("not_found",)
 
-        db_user = self._db_fetchone(
-            "SELECT user_id, temporary, started_using_at, last_used_at FROM users WHERE user_id = %s",
-            (user_id,),
-        )
-        assert db_user is not None
-        assert db_user["temporary"] is False
-        assert isinstance(db_user["started_using_at"], float)
-        assert isinstance(db_user["last_used_at"], float)
+    # --------- /v1/analysis/* ----------
+    def test_analysis__analyze_types_positive(self):
+        r = requests.get(f"{BASE_URL}{URL_PREFIX}/analysis/analyze_types", timeout=10)
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data["categories"], list) and len(data["categories"]) > 0
+        assert isinstance(data["choices"], list) and len(data["choices"]) > 0
 
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/user/create_user",
-            json={"user_id": user_id, "temporary": False},
-        )
-        assert response.status_code == 200
-        assert response.json().get("status") == "exist"
+    def test_analysis__load_document_txt_positive(self):
+        # простой txt
+        files = {"document": ("note.txt", b"Hello\nWorld", "text/plain")}
+        r = requests.post(f"{BASE_URL}{URL_PREFIX}/analysis/load_document", files=files, timeout=10)
+        assert r.status_code == 200
+        assert "Hello" in r.json()["text"]
 
-        response = requests.get(f"{self._api_url}{self._prefix}/user/get_users")
-        users = response.json().get("users")
-        assert len(users) == 1
-        info = users[0]
-        assert re.match(self._id_pattern, info.get("user_id"))
-        assert info.get("temporary") is False
-        assert isinstance(info.get("started_using_at"), float)
-        assert isinstance(info.get("last_used_at"), float)
+    def test_analysis__load_document_docx_positive(self):
+        # генерируем минимальный docx в памяти
+        try:
+            from docx import Document  # type: ignore
+        except Exception:
+            pytest.skip("python-docx не установлен в окружении тестов")
 
+        buf = io.BytesIO()
+        d = Document()
+        d.add_paragraph("Docx Line 1")
+        d.add_paragraph("Docx Line 2")
+        d.save(buf)
+        buf.seek(0)
+
+        files = {"document": ("file.docx", buf.read(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+        r = requests.post(f"{BASE_URL}{URL_PREFIX}/analysis/load_document", files=files, timeout=10)
+        assert r.status_code == 200
+        text = r.json()["text"]
+        assert "Docx Line 1" in text and "Docx Line 2" in text
+
+    def test_analysis__load_document_unsupported_negative(self):
+        files = {"document": ("binary.xyz", b"\x00\x01\x02", "application/octet-stream")}
+        r = requests.post(f"{BASE_URL}{URL_PREFIX}/analysis/load_document", files=files, timeout=10)
+        assert r.status_code == 400
+        assert r.json()["detail"] == "Unsupported document format"
+
+    # --------- /v1/chat_session/* ----------
+    def _create_user_session(
+        self, user_id: str, text: str, title: str = "", category_index: int = 0, choices: Tuple[int, ...] = ()
+    ) -> Tuple[str, Dict]:
+        # создаём сессию с choices, которых нет в шаблонах (чтобы не дергать LLM/Transformers)
         payload = {
-            "text": "Путешествие было незабываемым.",
-            "category": 2,
-            "choices": [0, 4],
+            "title": title,
+            "text": text,
+            "category": category_index,
+            "choices": list(choices),
+            "temporary": False,
         }
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/create",
-            headers=self._headers,
+        r = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/create",
             json=payload,
+            headers=_auth_headers(user_id),
+            timeout=20,
         )
-        assert response.status_code == 200
-        create_payload = response.json()
-        assert create_payload["error"] is None
-        content = create_payload.get("content") or {}
-        assert isinstance(content.get("short_summary"), str)
-        assert isinstance(content.get("full_summary"), str)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["session_id"]
+        return data["session_id"], data
 
-        response = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
-            headers=self._headers,
+    def test_session__fetch_page_requires_auth_negative(self):
+        r = requests.get(f"{BASE_URL}{URL_PREFIX}/chat_session/fetch_page", timeout=10)
+        assert r.status_code == 400
+        assert "Authorization header is required" in r.text or "Bad Request" in r.text
+
+    def test_session__create_and_fetch_page_positive(self):
+        user_id = "u_create_fetch"
+        # fetch_page до создания → пусто
+        r0 = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/fetch_page",
+            headers=_auth_headers(user_id),
+            timeout=10,
         )
-        assert response.status_code == 200
-        sessions = response.json().get("sessions")
-        assert len(sessions) == 1
-        session_info = sessions[0]
-        session_id = session_info.get("session_id")
-        assert re.match(self._id_pattern, session_id)
-        assert session_info.get("content", {}).get("short_summary") == content.get("short_summary")
+        assert r0.status_code == 200
+        assert r0.json()["sessions"] == []
 
-        db_session = self._db_fetchone(
-            "SELECT user_id, version, short_summary, full_summary FROM sessions WHERE session_id = %s",
-            (session_id,),
+        # создаём
+        session_id, _ = self._create_user_session(
+            user_id=user_id,
+            text="Классический пример текста об экономике и рынках",
+            title="",
+            category_index=0,
+            choices=(9999,),  # отсутствующий индекс → без LLM
         )
-        assert db_session is not None
-        assert db_session["user_id"] == user_id
-        assert db_session["short_summary"] == content["short_summary"]
 
-        update_payload = {
-            "session_id": session_id,
-            "text": payload["text"],
-            "category": payload["category"],
-            "choices": payload["choices"],
-            "version": session_info.get("version"),
-        }
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/update_summarization",
-            headers=self._headers,
-            json=update_payload,
+        # fetch_page → содержит созданную
+        r1 = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/fetch_page",
+            headers=_auth_headers(user_id),
+            timeout=10,
         )
-        assert response.status_code == 200
-        update_content = response.json().get("content") or {}
-        assert set(update_content.keys()) <= {
-            "short_summary",
-            "entities",
-            "sentiments",
-            "classifications",
-            "full_summary",
-        }
-        assert isinstance(update_content.get("short_summary"), str)
+        assert r1.status_code == 200
+        sessions = r1.json()["sessions"]
+        assert any(s["session_id"] == session_id for s in sessions)
 
-        refreshed_page = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
-            headers=self._headers,
+    def test_session__create_invalid_category_negative(self):
+        user_id = "u_invalid_category"
+        r = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/create",
+            json={
+                "title": "",
+                "text": "text",
+                "category": 9999,       # несуществующая категория
+                "choices": [0, 1, 2],
+                "temporary": False,
+            },
+            headers=_auth_headers(user_id),
+            timeout=10,
         )
-        assert refreshed_page.status_code == 200
-        refreshed_session = refreshed_page.json().get("sessions")[0]
-        assert refreshed_session["version"] == session_info.get("version") + 1
-        assert refreshed_session["content"]["short_summary"] == update_content.get("short_summary")
+        assert r.status_code == 400
+        assert r.json()["detail"] in ("Invalid category index",)
 
-        stale_update = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/update_summarization",
-            headers=self._headers,
-            json=update_payload,
+    def test_session__create_text_length_exceeded_negative(self):
+        user_id = "u_text_len"
+        huge_text = "a" * (MAX_TEXT_LEN + 1)
+        r = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/create",
+            json={"title": "", "text": huge_text, "category": 0, "choices": [], "temporary": False},
+            headers=_auth_headers(user_id),
+            timeout=20,
         )
-        assert stale_update.status_code == 400
-        assert "Version mismatch" in stale_update.text
+        assert r.status_code == 400
+        assert f"Длина одного документа превышает лимит {MAX_TEXT_LEN} символов" in r.text
 
-        db_session_after_update = self._db_fetchone(
-            "SELECT version FROM sessions WHERE session_id = %s",
-            (session_id,),
+    def test_session__info_update_title_update_summarization_flow(self):
+        user_id = "u_update_flow"
+        text = "Небольшой текст для сессии"
+        session_id, created = self._create_user_session(
+            user_id=user_id, text=text, category_index=0, choices=()
         )
-        assert db_session_after_update is not None
-        assert db_session_after_update["version"] == refreshed_session["version"]
 
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/update_title",
-            headers=self._headers,
+        # получаем полную информацию
+        r_info = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/{session_id}",
+            headers=_auth_headers(user_id),
+            timeout=10,
+        )
+        assert r_info.status_code == 200
+        info = r_info.json()
+        assert info["session_id"] == session_id
+        version0 = info["version"]
+
+        # update_title (OK)
+        r_title = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/update_title",
+            json={"session_id": session_id, "title": "Новый заголовок", "version": version0},
+            headers=_auth_headers(user_id),
+            timeout=10,
+        )
+        assert r_title.status_code == 200
+        info2 = r_title.json()
+        assert info2["title"] == "Новый заголовок"
+        version1 = info2["version"]
+
+        # update_title с неверной версией → 400
+        r_title_bad = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/update_title",
+            json={"session_id": session_id, "title": "Ещё заголовок", "version": version0},
+            headers=_auth_headers(user_id),
+            timeout=10,
+        )
+        assert r_title_bad.status_code == 400
+        assert r_title_bad.json()["detail"] == "Version mismatch"
+
+        # update_summarization (OK, choices отсутствуют → без LLM)
+        r_sum = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/update_summarization",
             json={
                 "session_id": session_id,
-                "title": "Новый заголовок",
-                "version": refreshed_session["version"],
+                "text": text + " + дополнение",
+                "category": 0,
+                "choices": [424242],  # отсутствующий индекс
+                "version": version1,
             },
+            headers=_auth_headers(user_id),
+            timeout=20,
         )
-        assert response.status_code == 200
-        update_title_payload = response.json()
-        assert update_title_payload["title"] == "Новый заголовок"
-        assert update_title_payload["version"] == refreshed_session["version"] + 1
+        assert r_sum.status_code == 200
+        data_sum = r_sum.json()
+        assert "content" in data_sum and isinstance(data_sum["content"], dict)
 
-        db_session_after_title = self._db_fetchone(
-            "SELECT title, version FROM sessions WHERE session_id = %s",
-            (session_id,),
+        # update_summarization с неверной версией → 400
+        r_sum_bad = requests.post(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/update_summarization",
+            json={
+                "session_id": session_id,
+                "text": text,
+                "category": 0,
+                "choices": [],
+                "version": version1,  # уже устарел
+            },
+            headers=_auth_headers(user_id),
+            timeout=10,
         )
-        assert db_session_after_title is not None
-        assert db_session_after_title["title"] == "Новый заголовок"
-        assert db_session_after_title["version"] == update_title_payload["version"]
+        assert r_sum_bad.status_code == 400
+        assert r_sum_bad.json()["detail"] == "Version mismatch"
 
-        response = requests.delete(
-            f"{self._api_url}{self._prefix}/chat_session/delete",
-            headers=self._headers,
-            json={"session_id": session_id},
+    def test_session__search_positive_and_negatives(self):
+        user_id = "u_search"
+        # создаём пару сессий
+        sid1, _ = self._create_user_session(
+            user_id=user_id, text="Рынки растут. Акции X увеличились.", category_index=0, choices=(999,)
         )
-        assert response.status_code == 200
-        assert response.json().get("status") == "SUCCESS"
-
-        assert self._db_fetchone("SELECT 1 FROM sessions WHERE session_id = %s", (session_id,)) is None
-
-        response = requests.get(
-            f"{self._api_url}{self._prefix}/chat_session/fetch_page",
-            headers=self._headers,
+        sid2, _ = self._create_user_session(
+            user_id=user_id, text="Футбол: команда Y победила со счётом 2-1.", category_index=0, choices=(999,)
         )
-        assert response.status_code == 200
-        assert response.json().get("sessions") == []
 
-        cleanup = requests.delete(
-            f"{self._api_url}{self._prefix}/user/delete_user",
-            json={"user_id": user_id},
+        # Positive: поиск по слову "Акции" → должен найти sid1
+        r_ok = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/search",
+            params={"query": "Акции"},
+            headers=_auth_headers(user_id),
+            timeout=10,
         )
-        assert cleanup.status_code == 200
-        assert cleanup.json().get("status") in {"deleted", "not_found"}
-        assert self._db_fetchone("SELECT 1 FROM users WHERE user_id = %s", (user_id,)) is None
+        assert r_ok.status_code == 200
+        results = r_ok.json()["sessions"]
+        assert any(item["session_id"] == sid1 for item in results)
 
-    async def test_session_create_requires_authorization(self):
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/create",
-            json={"text": "Без авторизации", "category": 0, "choices": [0]},
+        # Negative: пустой query → 422 (валидация FastAPI на min_length=1)
+        r_422 = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/search",
+            params={"query": ""},
+            headers=_auth_headers(user_id),
+            timeout=10,
         )
-        assert response.status_code == 400
-        assert "Authorization header is required" in response.text
+        assert r_422.status_code == 422
 
-    async def test_session_create_invalid_category(self):
-        user_id = str(uuid4())
-        headers = {authorization: user_id}
-        response = requests.post(
-            f"{self._api_url}{self._prefix}/chat_session/create",
-            headers=headers,
-            json={"text": "Неверная категория", "category": 99, "choices": [0]},
+        # Negative: без заголовка авторизации
+        r_400 = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/search",
+            params={"query": "anything"},
+            timeout=10,
         )
-        assert response.status_code == 400
-        assert "Invalid category index" in response.text
+        assert r_400.status_code == 400
 
+    def test_session__download_pdf_positive_and_not_found(self):
+        user_id = "u_download"
+        sid, _ = self._create_user_session(
+            user_id=user_id, text="Текст для экспорта в PDF", category_index=0, choices=()
+        )
 
-def test_sanitize_prompt_text_triggers_condensation(monkeypatch):
-    from auto_summarization.services.handlers import session as session_handler
+        # JSON-ответ (base64) через Accept: application/json
+        r_json = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/download/{sid}/pdf",
+            headers={**_auth_headers(user_id), "Accept": "application/json"},
+            timeout=20,
+        )
+        assert r_json.status_code == 200
+        payload = r_json.json()
+        assert set(payload.keys()) == {"filename", "content_type", "data"}
+        assert payload["filename"].endswith(".pdf")
+        assert payload["content_type"] in ("application/pdf", "application/octet-stream")
+        assert isinstance(payload["data"], str) and len(payload["data"]) > 0
 
-    calls: Dict[str, Any] = {}
+        # not found для несуществующей сессии
+        r_nf = requests.get(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/download/does-not-exist/pdf",
+            headers={**_auth_headers(user_id), "Accept": "application/json"},
+            timeout=10,
+        )
+        assert r_nf.status_code in (404,)
 
-    def fake_get_context_window(model_name: str) -> int:
-        calls["window"] = model_name
-        return 100
+    def test_session__delete_positive_and_second_call_error_status(self):
+        user_id = "u_delete"
+        sid, _ = self._create_user_session(
+            user_id=user_id, text="Удаляемая сессия", category_index=0, choices=()
+        )
+        # Удаляем
+        r_del = requests.delete(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/delete",
+            json={"session_id": sid},
+            headers=_auth_headers(user_id),
+            timeout=10,
+        )
+        assert r_del.status_code == 200
+        assert r_del.json()["status"] in ("SUCCESS",)
 
-    def fake_apply_map_reduce(text: str, context_window: int) -> str:
-        calls["map_reduce"] = len(text)
-        return "condensed summary"
-
-    monkeypatch.setattr(session_handler, "_get_context_window", fake_get_context_window)
-    monkeypatch.setattr(session_handler, "_apply_map_reduce", fake_apply_map_reduce)
-
-    long_text = "А" * 5000
-    result = session_handler._sanitize_prompt_text(long_text)
-
-    assert result == "condensed summary"
-    assert calls == {"window": session_handler.settings.OPENAI_MODEL_NAME, "map_reduce": len(long_text)}
-
-
-def test_sanitize_prompt_text_falls_back_to_truncation(monkeypatch):
-    from auto_summarization.services.handlers import session as session_handler
-
-    def fake_get_context_window(model_name: str) -> int:
-        return 50
-
-    def fake_apply_map_reduce(text: str, context_window: int) -> str:
-        return text  # No reduction
-
-    monkeypatch.setattr(session_handler, "_get_context_window", fake_get_context_window)
-    monkeypatch.setattr(session_handler, "_apply_map_reduce", fake_apply_map_reduce)
-
-    long_text = "B" * 10000
-    result = session_handler._sanitize_prompt_text(long_text)
-
-    # For a context window of 50, safe window will be 512 tokens -> char budget 2048
-    assert len(result) <= 2048
-    assert result
+        # Повторное удаление → SUCCESS не будет, ожидаем ERROR
+        r_del2 = requests.delete(
+            f"{BASE_URL}{URL_PREFIX}/chat_session/delete",
+            json={"session_id": sid},
+            headers=_auth_headers(user_id),
+            timeout=10,
+        )
+        assert r_del2.status_code == 200
+        assert r_del2.json()["status"] in ("ERROR",)

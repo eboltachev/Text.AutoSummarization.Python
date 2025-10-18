@@ -13,10 +13,9 @@ from auto_summarization.entrypoints.schemas.session import (
     DeleteSessionRequest,
     DeleteSessionResponse,
     FetchSessionResponse,
-    SearchSessionsResponse,
     SessionContent,
     SessionInfo,
-    SessionSearchResult,
+    ShortSessionInfo,
     UpdateSessionSummarizationRequest,
     UpdateSessionSummarizationResponse,
     UpdateSessionTitleRequest,
@@ -32,6 +31,7 @@ from auto_summarization.services.handlers.session import (
     search_similarity_sessions,
     update_session_summarization,
     update_title_session,
+    get_session_info
 )
 
 router = APIRouter()
@@ -51,7 +51,7 @@ async def fetch_page(auth: str = Header(default=None, alias=authorization)) -> F
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
     try:
-        sessions = [SessionInfo(**session) for session in get_session_list(user_id=auth, uow=UserUoW())]
+        sessions = [ShortSessionInfo(**session) for session in get_session_list(user_id=auth, uow=UserUoW())]
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     return FetchSessionResponse(sessions=sessions)
@@ -67,6 +67,7 @@ async def create(
     try:
         session_id, content, error = create_new_session(
             user_id=auth,
+            title=request.title,
             text=request.text,
             category_index=request.category,
             choices=request.choices,
@@ -122,18 +123,36 @@ async def update_title(
     return UpdateSessionTitleResponse(**session)
 
 
-@router.get("/search", response_model=SearchSessionsResponse, status_code=200)
+@router.get("/search", response_model=FetchSessionResponse, status_code=200)
 async def similarity_sessions(
     query: str = Query(..., min_length=1),
     auth: str = Header(default=None, alias=authorization),
-) -> SearchSessionsResponse:
+) -> FetchSessionResponse:
     if auth is None:
         raise HTTPException(status_code=400, detail="Authorization header is required")
     try:
-        results = search_similarity_sessions(user_id=auth, query=query, uow=UserUoW())
+        sessions = [
+            ShortSessionInfo(**session) for session in
+            search_similarity_sessions(user_id=auth, query=query, uow=UserUoW())
+        ]
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
-    return SearchSessionsResponse(results=[SessionSearchResult(**item) for item in results])
+    return FetchSessionResponse(sessions=sessions)
+
+
+@router.get("/{session_id}", response_model=SessionInfo, status_code=200, summary="Информация о сессии")
+async def session_info(
+        session_id: str,
+        auth: str = Header(default=None, alias=authorization),
+) -> SessionInfo:
+    user_id = auth
+    if user_id is None:
+        raise HTTPException(status_code=400, detail="Bad Request")
+    try:
+        session = get_session_info(session_id=session_id, user_id=user_id, user_uow=UserUoW())
+    except ValueError as error:
+        raise HTTPException(status_code=400, detail=str(error))
+    return SessionInfo(**session)
 
 
 @router.get(
